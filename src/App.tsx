@@ -6,16 +6,14 @@ import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import Profile from '@/pages/Profile';
 import AdminPanel from '@/pages/AdminPanel';
+import TestPage from '@/pages/TestPage';
 import type { ReactNode } from 'react';
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { currentUser, loading } = useAuth();
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-primary)' }}>
-      <div className="text-center">
-        <div className="animate-spin w-10 h-10 border-2 border-[var(--border-color)] border-t-[var(--accent-primary)] rounded-full mx-auto mb-4" />
-        <p style={{ color: 'var(--text-muted)' }}>Загрузка...</p>
-      </div>
+    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+      <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--border)', borderTopColor: 'var(--accent)' }} />
     </div>
   );
   if (!currentUser) return <Navigate to="/login" />;
@@ -25,8 +23,8 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 function AdminRoute({ children }: { children: ReactNode }) {
   const { currentUser, userProfile, loading } = useAuth();
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-primary)' }}>
-      <div className="animate-spin w-10 h-10 border-2 border-[var(--border-color)] border-t-[var(--accent-primary)] rounded-full" />
+    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+      <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--border)', borderTopColor: 'var(--accent)' }} />
     </div>
   );
   if (!currentUser || !userProfile?.admin) return <Navigate to="/" />;
@@ -36,8 +34,8 @@ function AdminRoute({ children }: { children: ReactNode }) {
 function GuestRoute({ children }: { children: ReactNode }) {
   const { currentUser, loading } = useAuth();
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-primary)' }}>
-      <div className="animate-spin w-10 h-10 border-2 border-[var(--border-color)] border-t-[var(--accent-primary)] rounded-full" />
+    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+      <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--border)', borderTopColor: 'var(--accent)' }} />
     </div>
   );
   if (currentUser) return <Navigate to="/profile" />;
@@ -47,14 +45,23 @@ function GuestRoute({ children }: { children: ReactNode }) {
 function AppRoutes() {
   return (
     <>
-      <Navbar />
       <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
-        <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
-        <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-        <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
-        <Route path="*" element={<Navigate to="/" />} />
+        {/* Test page has NO navbar — clean student view */}
+        <Route path="/test/:testId" element={<TestPage />} />
+        {/* All other routes have navbar */}
+        <Route path="*" element={
+          <>
+            <Navbar />
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
+              <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
+              <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+              <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
+              <Route path="*" element={<Navigate to="/" />} />
+            </Routes>
+          </>
+        } />
       </Routes>
     </>
   );

@@ -4,6 +4,8 @@ import { ref, onValue, remove, set, push, get } from 'firebase/database';
 import { db } from '@/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import type { UserProfile } from '@/contexts/AuthContext';
+import TestEditor from '@/components/TestEditor';
+import type { Test, TestSubmission } from '@/types/test';
 
 interface FingerprintData { users: string[]; lastSeen: number; }
 
@@ -22,11 +24,15 @@ export default function AdminPanel() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [fingerprints, setFingerprints] = useState<Record<string, FingerprintData>>({});
   const [notifications, setNotifications] = useState<AdminNotification[]>([]);
-  const [activeTab, setActiveTab] = useState<'users' | 'security' | 'messages'>('users');
+  const [tests, setTests] = useState<Test[]>([]);
+  const [submissions, setSubmissions] = useState<Record<string, TestSubmission[]>>({});
+  const [activeTab, setActiveTab] = useState<'users' | 'tests' | 'security' | 'messages'>('users');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [showUserDetail, setShowUserDetail] = useState<UserProfile | null>(null);
+  const [editingTest, setEditingTest] = useState<Test | null | 'new'>(null);
+  const [viewSubmissions, setViewSubmissions] = useState<string | null>(null);
 
   useEffect(() => {
     if (!currentUser || !userProfile?.admin) { navigate('/'); return; }
@@ -44,7 +50,25 @@ export default function AdminPanel() {
         setNotifications(arr);
       }
     });
-    return () => { unsubUsers(); unsubFp(); unsubNotif(); };
+    const unsubTests = onValue(ref(db, 'tests'), snap => {
+      if (snap.exists()) {
+        const arr: Test[] = Object.entries(snap.val()).map(([id, val]) => ({ ...(val as Test), id }));
+        arr.sort((a, b) => b.createdAt - a.createdAt);
+        setTests(arr);
+      } else { setTests([]); }
+    });
+    const unsubSub = onValue(ref(db, 'testSubmissions'), snap => {
+      if (snap.exists()) {
+        const data = snap.val() as Record<string, Record<string, TestSubmission>>;
+        const result: Record<string, TestSubmission[]> = {};
+        for (const [testId, subs] of Object.entries(data)) {
+          result[testId] = Object.entries(subs).map(([id, v]) => ({ ...v, id }));
+          result[testId].sort((a, b) => b.submittedAt - a.submittedAt);
+        }
+        setSubmissions(result);
+      }
+    });
+    return () => { unsubUsers(); unsubFp(); unsubNotif(); unsubTests(); unsubSub(); };
   }, [currentUser, userProfile, navigate]);
 
   const filteredUsers = users.filter(u =>
@@ -69,29 +93,47 @@ export default function AdminPanel() {
   };
   const markRead = async (id: string) => { await set(ref(db, `adminNotifications/${id}/read`), true); };
 
+  // Test management
+  const saveTest = async (t: Test) => {
+    t.createdBy = currentUser!.uid;
+    await set(ref(db, `tests/${t.id}`), t);
+    setEditingTest(null);
+  };
+  const deleteTest = async (id: string) => {
+    if (confirm('Удалить этот тест?')) {
+      await remove(ref(db, `tests/${id}`));
+      await remove(ref(db, `testSubmissions/${id}`));
+    }
+  };
+  const togglePublish = async (id: string, cur: boolean) => {
+    await set(ref(db, `tests/${id}/published`), !cur);
+  };
+  const gradeSubmission = async (testId: string, subId: string, grade: number) => {
+    await set(ref(db, `testSubmissions/${testId}/${subId}/grade`), grade);
+    await set(ref(db, `testSubmissions/${testId}/${subId}/graded`), true);
+  };
+
+  const inputStyle = { background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-200)' };
+
+  // User detail modal
   const UserDetailModal = ({ user }: { user: UserProfile }) => {
-    const [tests, setTests] = useState<Record<string, unknown>>({});
-    useEffect(() => { get(ref(db, `testResults/${user.uid}`)).then(s => s.exists() && setTests(s.val())); }, [user.uid]);
-    const testArr = Object.entries(tests).map(([id, v]) => ({ id, ...(v as Record<string, unknown>) }));
+    const [uTests, setUTests] = useState<Record<string, unknown>>({});
+    useEffect(() => { get(ref(db, `testResults/${user.uid}`)).then(s => s.exists() && setUTests(s.val())); }, [user.uid]);
+    const testArr = Object.entries(uTests).map(([id, v]) => ({ id, ...(v as Record<string, unknown>) }));
 
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={() => setShowUserDetail(null)}>
         <div className="rounded-2xl p-6 max-w-xl w-full max-h-[85vh] overflow-y-auto animate-fade-in-up"
           style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
           onClick={e => e.stopPropagation()}>
-
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-lg font-bold" style={{ color: 'var(--text-100)' }}>Профиль</h2>
             <button onClick={() => setShowUserDetail(null)} style={{ color: 'var(--text-500)' }}>✕</button>
           </div>
-
-          {/* Info */}
           <div className="grid grid-cols-2 gap-2 mb-5">
             {[
-              { l: 'Имя', v: user.firstName },
-              { l: 'Фамилия', v: user.lastName },
-              { l: 'Email', v: user.email },
-              { l: 'UID', v: user.uid },
+              { l: 'Имя', v: user.firstName }, { l: 'Фамилия', v: user.lastName },
+              { l: 'Email', v: user.email }, { l: 'UID', v: user.uid },
               { l: 'Статус', v: user.admin ? 'Админ' : 'Пользователь' },
               { l: 'Регистрация', v: new Date(user.createdAt).toLocaleDateString('ru-RU') },
             ].map((item, i) => (
@@ -101,20 +143,16 @@ export default function AdminPanel() {
               </div>
             ))}
           </div>
-
-          {/* Fingerprints */}
           <div className="mb-5">
-            <h3 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-400)' }}>Отпечатки устройств</h3>
+            <h3 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-400)' }}>Отпечатки</h3>
             {(user.linkedFingerprints || []).length > 0 ? user.linkedFingerprints?.map((fp, i) => (
               <div key={i} className="p-2 rounded-lg text-[11px] font-mono break-all mb-1"
                 style={{ background: 'var(--bg-card)', color: 'var(--text-600)', border: '1px solid var(--border)' }}>{fp}</div>
             )) : <p className="text-xs" style={{ color: 'var(--text-600)' }}>Нет данных</p>}
           </div>
-
-          {/* Tests */}
           <div className="mb-5">
             <h3 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-400)' }}>Результаты тестов</h3>
-            {testArr.length === 0 ? <p className="text-xs" style={{ color: 'var(--text-600)' }}>Нет тестов</p> :
+            {testArr.length === 0 ? <p className="text-xs" style={{ color: 'var(--text-600)' }}>Нет</p> :
               testArr.map(t => (
                 <div key={t.id} className="flex justify-between p-2 rounded-lg mb-1" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
                   <span className="text-xs" style={{ color: 'var(--text-200)' }}>{(t as Record<string, unknown>).testName as string}</span>
@@ -123,24 +161,18 @@ export default function AdminPanel() {
               ))
             }
           </div>
-
-          {/* Actions */}
           <div className="flex flex-wrap gap-2 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
             <button onClick={() => toggleAdmin(user.uid, user.admin)}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+              className="px-3 py-1.5 rounded-lg text-xs font-medium"
               style={{ color: 'var(--accent-light)', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)' }}>
               {user.admin ? 'Снять админа' : 'Сделать админом'}
             </button>
             {user.suspiciousFlag && (
-              <button onClick={() => clearSuspicious(user.uid)}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ color: 'var(--green)', background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.1)' }}>
-                Снять подозр.
-              </button>
+              <button onClick={() => clearSuspicious(user.uid)} className="px-3 py-1.5 rounded-lg text-xs font-medium"
+                style={{ color: 'var(--green)', background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.1)' }}>Снять подозр.</button>
             )}
             <button onClick={() => { deleteUser(user.uid); setShowUserDetail(null); }}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ color: 'var(--red)', background: 'var(--red-bg)', border: '1px solid var(--red-border)' }}>
-              Удалить
-            </button>
+              className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ color: 'var(--red)', background: 'var(--red-bg)', border: '1px solid var(--red-border)' }}>Удалить</button>
           </div>
         </div>
       </div>
@@ -149,6 +181,21 @@ export default function AdminPanel() {
 
   if (!userProfile?.admin) return null;
 
+  // If editing a test — show editor fullscreen
+  if (editingTest !== null) {
+    return (
+      <div className="min-h-screen pt-20" style={{ background: 'var(--bg)' }}>
+        <div className="max-w-5xl mx-auto px-6 py-8">
+          <TestEditor
+            test={editingTest === 'new' ? null : editingTest}
+            onSave={saveTest}
+            onCancel={() => setEditingTest(null)}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen pt-20" style={{ background: 'var(--bg)' }}>
       {showUserDetail && <UserDetailModal user={showUserDetail} />}
@@ -156,18 +203,17 @@ export default function AdminPanel() {
       <div className="max-w-6xl mx-auto px-6 py-8">
         {/* Header */}
         <div className="mb-8">
-          <p className="text-[12px] font-mono tracking-[0.2em] uppercase mb-3" style={{ color: 'var(--accent-light)' }}>
-            // Управление
-          </p>
+          <p className="text-[12px] font-mono tracking-[0.2em] uppercase mb-3" style={{ color: 'var(--accent-light)' }}>// Управление</p>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-100)' }}>Панель управления</h1>
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-8">
           {[
             { label: 'Пользователей', value: users.length },
             { label: 'Админов', value: users.filter(u => u.admin).length },
             { label: 'Подозрительных', value: suspiciousUsers.length },
+            { label: 'Тестов', value: tests.length },
             { label: 'Уведомлений', value: notifications.filter(n => !n.read).length },
           ].map((s, i) => (
             <div key={i} className="text-center py-4 rounded-xl" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
@@ -181,30 +227,24 @@ export default function AdminPanel() {
         <div className="flex flex-wrap gap-2 mb-6">
           {[
             { key: 'users' as const, label: 'Пользователи' },
+            { key: 'tests' as const, label: `Тесты (${tests.length})` },
             { key: 'security' as const, label: 'Безопасность' },
             { key: 'messages' as const, label: `Сообщения${notifications.filter(n => !n.read).length ? ` (${notifications.filter(n => !n.read).length})` : ''}` },
           ].map(t => (
-            <button key={t.key} onClick={() => setActiveTab(t.key)}
+            <button key={t.key} onClick={() => { setActiveTab(t.key); setViewSubmissions(null); }}
               className="px-4 py-2 rounded-xl text-[13px] font-medium transition-all"
               style={activeTab === t.key
                 ? { background: 'var(--accent)', color: '#fff' }
                 : { border: '1px solid var(--border)', color: 'var(--text-500)', background: 'var(--bg-card)' }
-              }>
-              {t.label}
-            </button>
+              }>{t.label}</button>
           ))}
         </div>
 
-        {/* Users */}
+        {/* ===== USERS TAB ===== */}
         {activeTab === 'users' && (
           <div className="animate-fade-in-up">
-            <input
-              type="text" placeholder="Поиск по имени, email или ID..." value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl text-sm focus:outline-none mb-4 transition-colors"
-              style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-200)' }}
-            />
-
+            <input type="text" placeholder="Поиск..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl text-sm focus:outline-none mb-4" style={inputStyle} />
             <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -218,8 +258,7 @@ export default function AdminPanel() {
                   </thead>
                   <tbody>
                     {filteredUsers.map(user => (
-                      <tr key={user.uid} className="cursor-pointer transition-colors"
-                        style={{ borderBottom: '1px solid var(--border)' }}
+                      <tr key={user.uid} className="cursor-pointer transition-colors" style={{ borderBottom: '1px solid var(--border)' }}
                         onClick={() => setShowUserDetail(user)}
                         onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -244,8 +283,8 @@ export default function AdminPanel() {
                           </div>
                         </td>
                         <td className="px-5 py-3 text-right" onClick={e => e.stopPropagation()}>
-                          <button onClick={() => toggleAdmin(user.uid, user.admin)} className="text-[11px] px-2 py-1 rounded transition-colors" style={{ color: 'var(--text-600)' }}>👑</button>
-                          <button onClick={() => deleteUser(user.uid)} className="text-[11px] px-2 py-1 rounded transition-colors ml-1" style={{ color: 'var(--text-600)' }}>🗑</button>
+                          <button onClick={() => toggleAdmin(user.uid, user.admin)} className="text-[11px] px-2 py-1 rounded" style={{ color: 'var(--text-600)' }}>👑</button>
+                          <button onClick={() => deleteUser(user.uid)} className="text-[11px] px-2 py-1 rounded ml-1" style={{ color: 'var(--text-600)' }}>🗑</button>
                         </td>
                       </tr>
                     ))}
@@ -257,14 +296,170 @@ export default function AdminPanel() {
           </div>
         )}
 
-        {/* Security */}
+        {/* ===== TESTS TAB ===== */}
+        {activeTab === 'tests' && !viewSubmissions && (
+          <div className="animate-fade-in-up">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm" style={{ color: 'var(--text-500)' }}>{tests.length} тестов</p>
+              <button onClick={() => setEditingTest('new')}
+                className="px-4 py-2 rounded-xl text-sm font-medium text-white" style={{ background: 'var(--accent)' }}>
+                + Создать тест
+              </button>
+            </div>
+
+            {tests.length === 0 ? (
+              <div className="rounded-2xl p-12 text-center" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+                <div className="text-4xl mb-3">📝</div>
+                <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--text-200)' }}>Нет тестов</h3>
+                <p className="text-[13px] mb-4" style={{ color: 'var(--text-500)' }}>Создайте ваш первый тест</p>
+                <button onClick={() => setEditingTest('new')} className="text-[13px] font-medium" style={{ color: 'var(--accent-light)' }}>
+                  Создать →
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {tests.map(t => {
+                  const subCount = submissions[t.id]?.length || 0;
+                  const ungradedCount = submissions[t.id]?.filter(s => !s.graded).length || 0;
+                  return (
+                    <div key={t.id} className="glow-card rounded-2xl p-5 transition-all"
+                      style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h3 className="text-[15px] font-semibold" style={{ color: 'var(--text-100)' }}>{t.title}</h3>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{
+                              color: t.published ? 'var(--green)' : 'var(--text-600)',
+                              background: t.published ? 'rgba(74,222,128,0.06)' : 'var(--bg-card-hover)',
+                              border: `1px solid ${t.published ? 'rgba(74,222,128,0.15)' : 'var(--border)'}`
+                            }}>
+                              {t.published ? 'Опубликован' : 'Черновик'}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-3 text-[11px]" style={{ color: 'var(--text-600)' }}>
+                            <span>{t.stages?.length || 0} этапов</span>
+                            <span>{t.stages?.reduce((a, s) => a + s.questions.length, 0) || 0} вопросов</span>
+                            <span>{t.gradingMode === 'manual' ? 'Ручная проверка' : t.gradingMode === 'auto-complex' ? 'Авто (сложный)' : 'Авто (простой)'}</span>
+                            <span>{new Date(t.createdAt).toLocaleDateString('ru-RU')}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 items-center">
+                        <button onClick={() => setEditingTest(t)} className="text-[11px] px-2.5 py-1 rounded-lg"
+                          style={{ border: '1px solid var(--border)', color: 'var(--text-400)' }}>✏️ Редактировать</button>
+                        <button onClick={() => togglePublish(t.id, t.published)} className="text-[11px] px-2.5 py-1 rounded-lg"
+                          style={{ border: '1px solid var(--border)', color: 'var(--text-400)' }}>
+                          {t.published ? '📴 Снять' : '📡 Опубликовать'}
+                        </button>
+                        <button onClick={() => setViewSubmissions(t.id)} className="text-[11px] px-2.5 py-1 rounded-lg"
+                          style={{ border: '1px solid var(--border)', color: 'var(--text-400)' }}>
+                          📊 Ответы ({subCount}){ungradedCount > 0 && <span style={{ color: 'var(--amber)' }}> · {ungradedCount} ✗</span>}
+                        </button>
+                        <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/test/${t.id}`); }}
+                          className="text-[11px] px-2.5 py-1 rounded-lg" style={{ border: '1px solid var(--border)', color: 'var(--text-400)' }}>
+                          🔗 Ссылка
+                        </button>
+                        <button onClick={() => deleteTest(t.id)} className="text-[11px] px-2.5 py-1 rounded-lg"
+                          style={{ color: 'var(--red)', border: '1px solid var(--red-border)' }}>🗑</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ===== SUBMISSIONS VIEW ===== */}
+        {activeTab === 'tests' && viewSubmissions && (
+          <div className="animate-fade-in-up">
+            <button onClick={() => setViewSubmissions(null)} className="flex items-center gap-1 text-[13px] mb-4"
+              style={{ color: 'var(--accent-light)' }}>← Назад к тестам</button>
+
+            <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-100)' }}>
+              Ответы: {tests.find(t => t.id === viewSubmissions)?.title}
+            </h3>
+
+            {!(submissions[viewSubmissions]?.length) ? (
+              <div className="rounded-2xl p-8 text-center" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+                <p className="text-sm" style={{ color: 'var(--text-500)' }}>Пока нет ответов</p>
+              </div>
+            ) : (
+              <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                        {['Ученик', 'Класс', 'Дата', 'Баллы', 'Оценка', ''].map((h, i) => (
+                          <th key={i} className="text-left px-4 py-3 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-600)' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {submissions[viewSubmissions]?.map(sub => {
+                        const test = tests.find(t => t.id === viewSubmissions);
+                        return (
+                          <tr key={sub.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td className="px-4 py-3 text-sm" style={{ color: 'var(--text-200)' }}>{sub.studentName} {sub.studentLastName}</td>
+                            <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-500)' }}>{sub.studentClass}</td>
+                            <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-600)' }}>{new Date(sub.submittedAt).toLocaleString('ru-RU')}</td>
+                            <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--text-200)' }}>
+                              {sub.score !== undefined ? `${sub.score}/${sub.maxScore}` : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              {sub.graded ? (
+                                <span className="text-sm font-bold" style={{
+                                  color: (sub.grade || 0) >= 4 ? 'var(--green)' : (sub.grade || 0) === 3 ? 'var(--amber)' : 'var(--red)'
+                                }}>{sub.grade}</span>
+                              ) : (
+                                test?.gradingMode === 'manual' ? (
+                                  <div className="flex gap-1">
+                                    {[2, 3, 4, 5].map(g => (
+                                      <button key={g} onClick={() => gradeSubmission(viewSubmissions, sub.id, g)}
+                                        className="w-7 h-7 rounded-lg text-[12px] font-bold transition-all"
+                                        style={{
+                                          border: '1px solid var(--border)',
+                                          color: g >= 4 ? 'var(--green)' : g === 3 ? 'var(--amber)' : 'var(--red)',
+                                          background: 'var(--bg-card-hover)',
+                                        }}>{g}</button>
+                                    ))}
+                                  </div>
+                                ) : <span className="text-[11px]" style={{ color: 'var(--text-600)' }}>—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <details className="inline">
+                                <summary className="text-[11px] cursor-pointer" style={{ color: 'var(--accent-light)' }}>Ответы</summary>
+                                <div className="absolute right-4 mt-1 p-3 rounded-xl shadow-xl z-10 text-left max-w-sm max-h-60 overflow-y-auto"
+                                  style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                                  {test?.stages.map(s => s.questions.map(q => (
+                                    <div key={q.id} className="text-[11px] mb-2" style={{ color: 'var(--text-400)' }}>
+                                      <div className="font-medium" style={{ color: 'var(--text-200)' }}>{q.text.substring(0, 40)}</div>
+                                      <div>→ {q.type === 'choice' ? q.options[Number(sub.answers[q.id])]?.text || '—' : String(sub.answers[q.id] || '—')}</div>
+                                    </div>
+                                  )))}
+                                </div>
+                              </details>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ===== SECURITY TAB ===== */}
         {activeTab === 'security' && (
           <div className="space-y-4 animate-fade-in-up">
-            {/* Suspicious */}
             <div className="rounded-2xl p-5" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
               <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-100)' }}>Подозрительные аккаунты</h3>
               {suspiciousUsers.length === 0 ? (
-                <div className="py-6 text-center text-sm" style={{ color: 'var(--green)' }}>✓ Подозрительные не обнаружены</div>
+                <div className="py-6 text-center text-sm" style={{ color: 'var(--green)' }}>✓ Не обнаружены</div>
               ) : (
                 <div className="space-y-2">
                   {suspiciousUsers.map(u => (
@@ -272,8 +467,7 @@ export default function AdminPanel() {
                       style={{ border: '1px solid var(--red-border)', background: 'var(--red-bg)' }}>
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[10px] font-bold" style={{ background: 'var(--red)' }}>
-                          {u.firstName?.charAt(0)}{u.lastName?.charAt(0)}
-                        </div>
+                          {u.firstName?.charAt(0)}{u.lastName?.charAt(0)}</div>
                         <div>
                           <div className="text-sm font-medium" style={{ color: 'var(--text-100)' }}>{u.firstName} {u.lastName}</div>
                           <div className="text-[11px]" style={{ color: 'var(--text-500)' }}>{u.email}</div>
@@ -288,12 +482,10 @@ export default function AdminPanel() {
                 </div>
               )}
             </div>
-
-            {/* Shared Fingerprints */}
             <div className="rounded-2xl p-5" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
               <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-100)' }}>Общие устройства</h3>
               {sharedFingerprints.length === 0 ? (
-                <div className="py-6 text-center text-sm" style={{ color: 'var(--green)' }}>✓ Все устройства уникальны</div>
+                <div className="py-6 text-center text-sm" style={{ color: 'var(--green)' }}>✓ Все уникальны</div>
               ) : (
                 <div className="space-y-2">
                   {sharedFingerprints.map(([fpHash, data]) => {
@@ -319,14 +511,13 @@ export default function AdminPanel() {
           </div>
         )}
 
-        {/* Messages */}
+        {/* ===== MESSAGES TAB ===== */}
         {activeTab === 'messages' && (
           <div className="space-y-3 animate-fade-in-up">
             {notifications.length === 0 ? (
               <div className="rounded-2xl p-12 text-center" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
                 <div className="text-4xl mb-3">💬</div>
                 <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--text-200)' }}>Нет сообщений</h3>
-                <p className="text-[13px]" style={{ color: 'var(--text-500)' }}>Пользователи еще не писали</p>
               </div>
             ) : (
               notifications.map(n => (
@@ -349,13 +540,11 @@ export default function AdminPanel() {
                     )}
                   </div>
                   <p className="text-sm ml-11 mb-3" style={{ color: 'var(--text-400)' }}>{n.text}</p>
-
                   {selectedUser === n.userId ? (
                     <div className="flex gap-2 ml-11">
                       <input type="text" value={replyText} onChange={e => setReplyText(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter') { sendReply(n.userId); setSelectedUser(null); } }}
-                        placeholder="Ответ..." className="flex-1 px-3 py-2 rounded-lg text-sm focus:outline-none"
-                        style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-200)' }} autoFocus />
+                        placeholder="Ответ..." className="flex-1 px-3 py-2 rounded-lg text-sm focus:outline-none" style={inputStyle} autoFocus />
                       <button onClick={() => { sendReply(n.userId); setSelectedUser(null); }}
                         className="px-3 py-2 text-white text-sm rounded-lg" style={{ background: 'var(--accent)' }}>↑</button>
                       <button onClick={() => setSelectedUser(null)} className="px-2 py-2 text-sm rounded-lg" style={{ color: 'var(--text-600)' }}>✕</button>
