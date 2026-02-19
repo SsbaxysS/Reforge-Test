@@ -62,7 +62,7 @@ export default function Register() {
         </Link>
 
         <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
-          <div className="p-8">
+          <div className="p-5 sm:p-8">
             <div className="mb-6">
               <div className="w-8 h-8 rounded-lg flex items-center justify-center mb-5" style={{ background: 'var(--accent)' }}>
                 <span className="text-white font-bold text-xs">R</span>
@@ -95,7 +95,7 @@ export default function Register() {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs mb-1.5" style={{ color: 'var(--text-500)' }}>Имя</label>
                     <input type="text" value={firstName} onChange={e => setFirstName(e.target.value)} required placeholder="Иван"

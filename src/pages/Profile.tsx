@@ -127,13 +127,13 @@ export default function Profile() {
             <div className="flex-1">
               {editingName ? (
                 <div className="flex flex-col gap-2">
-                  <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <input value={editFirstName} onChange={(e) => setEditFirstName(e.target.value)}
-                      placeholder="Имя" className="px-3 py-1.5 rounded-lg text-sm bg-transparent outline-none"
-                      style={{ border: '1px solid var(--border)', color: 'var(--text-100)', width: '140px' }} />
+                      placeholder="Имя" className="flex-1 min-w-0 px-3 py-1.5 rounded-lg text-sm bg-transparent outline-none"
+                      style={{ border: '1px solid var(--border)', color: 'var(--text-100)' }} />
                     <input value={editLastName} onChange={(e) => setEditLastName(e.target.value)}
-                      placeholder="Фамилия" className="px-3 py-1.5 rounded-lg text-sm bg-transparent outline-none"
-                      style={{ border: '1px solid var(--border)', color: 'var(--text-100)', width: '140px' }} />
+                      placeholder="Фамилия" className="flex-1 min-w-0 px-3 py-1.5 rounded-lg text-sm bg-transparent outline-none"
+                      style={{ border: '1px solid var(--border)', color: 'var(--text-100)' }} />
                   </div>
                   <div className="flex gap-2">
                     <button onClick={saveName} disabled={savingName || !editFirstName.trim() || !editLastName.trim()}
@@ -259,7 +259,7 @@ export default function Profile() {
             </div>
 
             {/* Messages */}
-            <div className="h-80 overflow-y-auto p-4 space-y-2">
+            <div className="h-60 sm:h-80 overflow-y-auto p-4 space-y-2">
               {messages.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-sm" style={{ color: 'var(--text-600)' }}>
                   Напишите первое сообщение

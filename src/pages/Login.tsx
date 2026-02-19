@@ -54,7 +54,7 @@ export default function Login() {
         </Link>
 
         <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
-          <div className="p-8">
+          <div className="p-5 sm:p-8">
             {/* Header */}
             <div className="mb-6">
               <div className="w-8 h-8 rounded-lg flex items-center justify-center mb-5" style={{ background: 'var(--accent)' }}>

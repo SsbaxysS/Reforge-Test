@@ -7,7 +7,7 @@ export default function Home() {
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg)' }}>
       {/* Hero */}
-      <section className="relative min-h-[85vh] flex items-center justify-center overflow-hidden">
+      <section className="relative min-h-[70vh] sm:min-h-[85vh] flex items-center justify-center overflow-hidden">
         {/* Subtle grid */}
         <div className="absolute inset-0 opacity-[0.015]" style={{
           backgroundImage: `linear-gradient(rgba(255,255,255,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.3) 1px, transparent 1px)`,
@@ -15,7 +15,7 @@ export default function Home() {
         }} />
 
         {/* Content */}
-        <div className="relative z-10 max-w-3xl mx-auto px-6 text-center pt-14">
+        <div className="relative z-10 max-w-3xl mx-auto px-4 sm:px-6 text-center pt-20 sm:pt-14">
           {/* Badge */}
           <div
             className="animate-fade-in-up stagger-1 inline-flex items-center gap-2 text-xs px-4 py-1.5 rounded-full mb-8"
@@ -27,7 +27,7 @@ export default function Home() {
 
           {/* Title */}
           <h1
-            className="animate-fade-in-up stagger-2 text-5xl sm:text-6xl md:text-7xl font-bold tracking-tight leading-[1.05] mb-6"
+            className="animate-fade-in-up stagger-2 text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight leading-[1.05] mb-6"
             style={{ color: 'var(--text-100)' }}
           >
             Reforge Test
@@ -123,7 +123,7 @@ export default function Home() {
           </div>
 
           {/* Grid */}
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
               {
                 icon: '◎',
@@ -230,7 +230,7 @@ export default function Home() {
             ].map((item, i) => (
               <div
                 key={i}
-                className="flex gap-6 items-start group p-5 rounded-2xl transition-all duration-500"
+                className="flex gap-4 sm:gap-6 items-start group p-4 sm:p-5 rounded-2xl transition-all duration-500"
                 style={{ border: '1px solid transparent' }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--bg-card)'; }}
                 onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.background = 'transparent'; }}

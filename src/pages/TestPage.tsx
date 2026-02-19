@@ -212,7 +212,7 @@ export default function TestPage() {
             <div className="min-h-screen pt-6 pb-20 px-6" style={{ background: 'var(--bg)' }}>
                 <div className="max-w-3xl mx-auto">
                     {/* Header */}
-                    <div className="flex items-center justify-between mb-6">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-6">
                         <div>
                             <h1 className="text-lg font-bold" style={{ color: 'var(--text-100)' }}>{test.title}</h1>
                             <p className="text-[12px]" style={{ color: 'var(--text-600)' }}>{studentName} {studentLastName} · {studentClass}</p>
@@ -263,7 +263,7 @@ export default function TestPage() {
                                 </div>
 
                                 {q.type === 'choice' ? (
-                                    <div className="space-y-2 ml-6">
+                                    <div className="space-y-2 ml-3 sm:ml-6">
                                         {q.options.map((opt, oIdx) => (
                                             <button key={oIdx} onClick={() => setAnswer(q.id, oIdx)}
                                                 className="w-full text-left flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-all text-sm"
@@ -284,7 +284,7 @@ export default function TestPage() {
                                         ))}
                                     </div>
                                 ) : (
-                                    <div className="ml-6">
+                                    <div className="ml-3 sm:ml-6">
                                         <textarea value={String(answers[q.id] || '')} onChange={e => setAnswer(q.id, e.target.value)}
                                             placeholder="Введите ответ..."
                                             className="w-full px-3.5 py-2.5 rounded-xl text-sm focus:outline-none resize-y min-h-[60px]" style={inputStyle} />
@@ -295,7 +295,7 @@ export default function TestPage() {
                     </div>
 
                     {/* Navigation */}
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                         <button onClick={() => setCurrentStage(Math.max(0, currentStage - 1))} disabled={currentStage === 0}
                             className="px-4 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-30"
                             style={{ border: '1px solid var(--border)', color: 'var(--text-400)' }}>
@@ -355,7 +355,7 @@ export default function TestPage() {
                                 </div>
                                 <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--text-100)' }}>Тест завершён</h2>
 
-                                <div className="grid grid-cols-3 gap-3 mb-6">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
                                     <div className="py-3 rounded-xl" style={{ border: '1px solid var(--border)', background: 'var(--bg-card-hover)' }}>
                                         <div className="text-2xl font-bold" style={{ color: 'var(--text-100)' }}>{result.score}/{result.maxScore}</div>
                                         <div className="text-[10px] uppercase" style={{ color: 'var(--text-600)' }}>Баллы</div>

@@ -387,7 +387,7 @@ export default function AdminPanel() {
       {showUserDetail && <UserDetailModal user={showUserDetail} />}
       <PreviewModal />
 
-      <div className="max-w-6xl mx-auto px-6 py-8">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
         {/* Header */}
         <div className="mb-8">
           <p className="text-[12px] font-mono tracking-[0.2em] uppercase mb-3" style={{ color: 'var(--accent-light)' }}>// Управление</p>
@@ -395,7 +395,7 @@ export default function AdminPanel() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-8">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
           {[
             { label: 'Пользователей', value: users.length },
             { label: 'Админов', value: users.filter(u => u.admin).length },
@@ -681,7 +681,7 @@ export default function AdminPanel() {
                     const linked = users.filter(u => data.users.includes(u.uid));
                     return (
                       <div key={fpHash} className="p-3 rounded-xl" style={{ border: '1px solid var(--border)', background: 'var(--bg-card-hover)' }}>
-                        <div className="flex items-center justify-between mb-2">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
                           <span className="text-[10px] font-mono break-all" style={{ color: 'var(--text-600)' }}>{fpHash.substring(0, 28)}...</span>
                           <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0 ml-2" style={{ color: 'var(--amber)', background: 'rgba(251,191,36,0.06)' }}>{data.users.length} акк.</span>
                         </div>
