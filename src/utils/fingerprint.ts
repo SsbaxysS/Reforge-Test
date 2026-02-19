@@ -195,3 +195,46 @@ export function markTestCompleted(testId: string): void {
     // silently fail
   }
 }
+
+// ============ WEIGHTED ANTI-CHEAT HELPERS ============
+
+export interface DeviceSignals {
+  screenRes: string;
+  timezone: string;
+  timezoneOffset: number;
+  hardwareConcurrency: number;
+  deviceMemory: number;
+  language: string;
+  platform: string;
+}
+
+export function getDeviceSignals(): DeviceSignals {
+  return {
+    screenRes: `${screen.width}x${screen.height}`,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timezoneOffset: new Date().getTimezoneOffset(),
+    hardwareConcurrency: navigator.hardwareConcurrency || 0,
+    deviceMemory: (navigator as unknown as Record<string, unknown>).deviceMemory as number || 0,
+    language: navigator.language,
+    platform: navigator.platform || 'unknown',
+  };
+}
+
+export function getCreationTimestamps(): number[] {
+  try {
+    const stored = localStorage.getItem('rf_creation_ts');
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function storeCreationTimestamp(): void {
+  try {
+    const existing = getCreationTimestamps();
+    existing.push(Date.now());
+    localStorage.setItem('rf_creation_ts', JSON.stringify(existing));
+  } catch {
+    // silently fail
+  }
+}

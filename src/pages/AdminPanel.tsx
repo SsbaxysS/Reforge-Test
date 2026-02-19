@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { renderMarkdown } from '@/utils/markdown';
 import { ref, onValue, remove, set, push, get } from 'firebase/database';
 import { db } from '@/firebase';
 import { useAuth } from '@/contexts/AuthContext';
@@ -33,6 +34,8 @@ export default function AdminPanel() {
   const [showUserDetail, setShowUserDetail] = useState<UserProfile | null>(null);
   const [editingTest, setEditingTest] = useState<Test | null | 'new'>(null);
   const [viewSubmissions, setViewSubmissions] = useState<string | null>(null);
+  const [previewTest, setPreviewTest] = useState<Test | null>(null);
+  const [previewStage, setPreviewStage] = useState(0);
 
   useEffect(() => {
     if (!currentUser || !userProfile?.admin) { navigate('/'); return; }
@@ -118,8 +121,19 @@ export default function AdminPanel() {
   // User detail modal
   const UserDetailModal = ({ user }: { user: UserProfile }) => {
     const [uTests, setUTests] = useState<Record<string, unknown>>({});
+    const [editFN, setEditFN] = useState(user.firstName);
+    const [editLN, setEditLN] = useState(user.lastName);
+    const [saving, setSaving] = useState(false);
     useEffect(() => { get(ref(db, `testResults/${user.uid}`)).then(s => s.exists() && setUTests(s.val())); }, [user.uid]);
     const testArr = Object.entries(uTests).map(([id, v]) => ({ id, ...(v as Record<string, unknown>) }));
+
+    const saveUserName = async () => {
+      if (!editFN.trim() || !editLN.trim()) return;
+      setSaving(true);
+      await set(ref(db, `users/${user.uid}/firstName`), editFN.trim());
+      await set(ref(db, `users/${user.uid}/lastName`), editLN.trim());
+      setSaving(false);
+    };
 
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={() => setShowUserDetail(null)}>
@@ -130,9 +144,32 @@ export default function AdminPanel() {
             <h2 className="text-lg font-bold" style={{ color: 'var(--text-100)' }}>Профиль</h2>
             <button onClick={() => setShowUserDetail(null)} style={{ color: 'var(--text-500)' }}>✕</button>
           </div>
+
+          {/* Editable name fields */}
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className="p-3 rounded-xl" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+              <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-600)' }}>Имя</div>
+              <input value={editFN} onChange={e => setEditFN(e.target.value)}
+                className="w-full text-xs font-medium bg-transparent outline-none px-2 py-1 rounded-lg"
+                style={{ border: '1px solid var(--border)', color: 'var(--text-100)' }} />
+            </div>
+            <div className="p-3 rounded-xl" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+              <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-600)' }}>Фамилия</div>
+              <input value={editLN} onChange={e => setEditLN(e.target.value)}
+                className="w-full text-xs font-medium bg-transparent outline-none px-2 py-1 rounded-lg"
+                style={{ border: '1px solid var(--border)', color: 'var(--text-100)' }} />
+            </div>
+          </div>
+          {(editFN !== user.firstName || editLN !== user.lastName) && (
+            <button onClick={saveUserName} disabled={saving}
+              className="text-[11px] px-3 py-1 rounded-lg font-medium text-white mb-3 disabled:opacity-40"
+              style={{ background: 'var(--accent)' }}>
+              {saving ? '...' : '✓ Сохранить имя'}
+            </button>
+          )}
+
           <div className="grid grid-cols-2 gap-2 mb-5">
             {[
-              { l: 'Имя', v: user.firstName }, { l: 'Фамилия', v: user.lastName },
               { l: 'Email', v: user.email }, { l: 'UID', v: user.uid },
               { l: 'Статус', v: user.admin ? 'Админ' : 'Пользователь' },
               { l: 'Регистрация', v: new Date(user.createdAt).toLocaleDateString('ru-RU') },
@@ -143,6 +180,24 @@ export default function AdminPanel() {
               </div>
             ))}
           </div>
+
+          {/* Suspicious score */}
+          {(user.suspiciousFlag || (user.suspiciousScore && user.suspiciousScore > 0)) && (
+            <div className="mb-5 p-3 rounded-xl" style={{ border: '1px solid var(--red-border)', background: 'var(--red-bg)' }}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[11px] font-semibold" style={{ color: 'var(--red)' }}>
+                  ⚠ Подозрительность: {user.suspiciousScore || 0} / {50}
+                </span>
+                {user.suspiciousFlag && <span className="text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ color: '#fff', background: 'var(--red)' }}>FLAGGED</span>}
+              </div>
+              {user.suspiciousReasons && user.suspiciousReasons.length > 0 && (
+                <div className="text-[10px] space-y-0.5" style={{ color: 'var(--text-500)' }}>
+                  {user.suspiciousReasons.map((r, i) => <div key={i}>• {r}</div>)}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="mb-5">
             <h3 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-400)' }}>Отпечатки</h3>
             {(user.linkedFingerprints || []).length > 0 ? user.linkedFingerprints?.map((fp, i) => (
@@ -181,6 +236,137 @@ export default function AdminPanel() {
 
   if (!userProfile?.admin) return null;
 
+  // Preview modal
+  const PreviewModal = () => {
+    if (!previewTest) return null;
+    const stage = previewTest.stages[previewStage];
+    if (!stage) return null;
+    return (
+      <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: 'var(--bg)' }}>
+        {/* Top bar */}
+        <div className="sticky top-0 z-10 px-6 py-3 flex items-center justify-between" style={{ background: 'var(--bg)', borderBottom: '1px solid var(--border)' }}>
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded" style={{ color: 'var(--accent-light)', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)' }}>ПРЕДПРОСМОТР</span>
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--text-100)' }}>{previewTest.title}</h2>
+          </div>
+          <button onClick={() => setPreviewTest(null)} className="px-3 py-1.5 rounded-lg text-xs font-medium"
+            style={{ border: '1px solid var(--border)', color: 'var(--text-400)' }}>✕ Закрыть</button>
+        </div>
+
+        <div className="max-w-3xl mx-auto px-6 py-8">
+          {/* Test info */}
+          <div className="rounded-xl p-5 mb-6" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+            <h1 className="text-xl font-bold mb-1" style={{ color: 'var(--text-100)' }}>{previewTest.title}</h1>
+            {previewTest.description && <p className="text-sm" style={{ color: 'var(--text-500)' }}>{previewTest.description}</p>}
+            <div className="flex flex-wrap gap-3 mt-3 text-[11px]" style={{ color: 'var(--text-600)' }}>
+              <span>{previewTest.stages.length} этапов</span>
+              <span>{previewTest.stages.reduce((a, s) => a + s.questions.length, 0)} вопросов</span>
+              <span>{previewTest.gradingMode === 'manual' ? 'Ручная проверка' : previewTest.gradingMode === 'auto-complex' ? 'Авто (баллы)' : 'Авто (простой)'}</span>
+            </div>
+          </div>
+
+          {/* Stage navigation */}
+          <div className="flex flex-wrap gap-1.5 mb-6">
+            {previewTest.stages.map((s, i) => (
+              <button key={s.id} onClick={() => setPreviewStage(i)}
+                className="px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all"
+                style={i === previewStage
+                  ? { background: 'var(--accent)', color: '#fff' }
+                  : { border: '1px solid var(--border)', color: 'var(--text-500)', background: 'var(--bg-card)' }
+                }>
+                {s.title || `Этап ${i + 1}`}
+              </button>
+            ))}
+          </div>
+
+          {/* Stage content */}
+          {stage.content && (
+            <div className="rounded-xl p-5 mb-6 markdown-content"
+              style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(stage.content) }} />
+          )}
+
+          {/* Questions */}
+          <div className="space-y-4">
+            {stage.questions.map((q, qIdx) => (
+              <div key={q.id} className="rounded-xl p-5" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+                <div className="flex items-start gap-3 mb-4">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 mt-0.5"
+                    style={{ color: 'var(--text-600)', background: 'var(--bg-card-hover)' }}>
+                    {qIdx + 1}
+                  </span>
+                  <div className="flex-1">
+                    <div className="markdown-content text-sm" style={{ color: 'var(--text-200)' }}
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(q.text) }} />
+                    {previewTest.gradingMode === 'auto-complex' && (
+                      <span className="text-[10px] mt-1 inline-block" style={{ color: 'var(--text-600)' }}>{q.points} б.</span>
+                    )}
+                  </div>
+                </div>
+
+                {q.type === 'choice' ? (
+                  <div className="space-y-2 ml-6">
+                    {q.options.map((opt, oIdx) => (
+                      <div key={oIdx}
+                        className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm"
+                        style={{
+                          border: `1px solid ${opt.correct ? 'rgba(74,222,128,0.25)' : 'var(--border)'}`,
+                          background: opt.correct ? 'rgba(74,222,128,0.04)' : 'var(--bg-card-hover)',
+                          color: 'var(--text-200)',
+                        }}>
+                        <div className="w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0"
+                          style={{ borderColor: opt.correct ? 'var(--green)' : 'var(--border-hover)' }}>
+                          {opt.correct && <span className="text-[8px]" style={{ color: 'var(--green)' }}>●</span>}
+                        </div>
+                        {opt.text}
+                        {opt.correct && <span className="text-[10px] ml-auto" style={{ color: 'var(--green)' }}>✓ правильный</span>}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="ml-6">
+                    <div className="px-3.5 py-2.5 rounded-xl text-sm" style={{ ...inputStyle, opacity: 0.5 }}>
+                      Текстовое поле для ответа
+                    </div>
+                    {q.correctAnswers && q.correctAnswers.length > 0 && q.correctAnswers[0] && (
+                      <div className="mt-2 text-[11px]" style={{ color: 'var(--green)' }}>
+                        Ожидаемый ответ: {q.correctAnswers.join(' / ')}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {q.explanation && (
+                  <div className="mt-3 ml-6 text-[12px] px-3 py-2 rounded-lg" style={{ color: 'var(--text-500)', background: 'var(--bg-card-hover)', border: '1px solid var(--border)' }}>
+                    💡 {q.explanation}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Stage navigation bottom */}
+          <div className="flex items-center justify-between mt-6">
+            <button onClick={() => setPreviewStage(Math.max(0, previewStage - 1))} disabled={previewStage === 0}
+              className="px-4 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-30"
+              style={{ border: '1px solid var(--border)', color: 'var(--text-400)' }}>
+              ← Назад
+            </button>
+            <span className="text-[12px]" style={{ color: 'var(--text-600)' }}>
+              Этап {previewStage + 1} / {previewTest.stages.length}
+            </span>
+            <button onClick={() => setPreviewStage(Math.min(previewTest.stages.length - 1, previewStage + 1))}
+              disabled={previewStage === previewTest.stages.length - 1}
+              className="px-4 py-2 rounded-xl text-sm font-medium text-white transition-all disabled:opacity-30"
+              style={{ background: 'var(--accent)' }}>
+              Далее →
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // If editing a test — show editor fullscreen
   if (editingTest !== null) {
     return (
@@ -199,6 +385,7 @@ export default function AdminPanel() {
   return (
     <div className="min-h-screen pt-20" style={{ background: 'var(--bg)' }}>
       {showUserDetail && <UserDetailModal user={showUserDetail} />}
+      <PreviewModal />
 
       <div className="max-w-6xl mx-auto px-6 py-8">
         {/* Header */}
@@ -348,6 +535,8 @@ export default function AdminPanel() {
                       <div className="flex flex-wrap gap-2 items-center">
                         <button onClick={() => setEditingTest(t)} className="text-[11px] px-2.5 py-1 rounded-lg"
                           style={{ border: '1px solid var(--border)', color: 'var(--text-400)' }}>✏️ Редактировать</button>
+                        <button onClick={() => { setPreviewTest(t); setPreviewStage(0); }} className="text-[11px] px-2.5 py-1 rounded-lg"
+                          style={{ border: '1px solid var(--border)', color: 'var(--text-400)' }}>👁 Предпросмотр</button>
                         <button onClick={() => togglePublish(t.id, t.published)} className="text-[11px] px-2.5 py-1 rounded-lg"
                           style={{ border: '1px solid var(--border)', color: 'var(--text-400)' }}>
                           {t.published ? '📴 Снять' : '📡 Опубликовать'}

@@ -9,7 +9,7 @@ import {
 } from 'firebase/auth';
 import { ref, set, get, onValue } from 'firebase/database';
 import { auth, db, googleProvider } from '@/firebase';
-import { generateFingerprint, storeFingerprint, storeUserId, getStoredUserIds } from '@/utils/fingerprint';
+import { generateFingerprint, storeFingerprint, storeUserId, getStoredUserIds, getDeviceSignals, getCreationTimestamps, storeCreationTimestamp } from '@/utils/fingerprint';
 
 export interface UserProfile {
   uid: string;
@@ -21,6 +21,8 @@ export interface UserProfile {
   fingerprint: string;
   linkedFingerprints: string[];
   suspiciousFlag: boolean;
+  suspiciousScore?: number;
+  suspiciousReasons?: string[];
 }
 
 interface AuthContextType {
@@ -46,19 +48,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  async function checkAntiCheat(uid: string, fingerprint: string) {
+  const SUSPICIOUS_THRESHOLD = 50;
+
+  async function checkAntiCheat(uid: string, fingerprint: string, isNewAccount = false) {
     // Store locally
     storeFingerprint(fingerprint);
     storeUserId(uid);
+    if (isNewAccount) storeCreationTimestamp();
 
-    // Check if other users used this device
-    const localUserIds = getStoredUserIds();
-    const otherUsers = localUserIds.filter(id => id !== uid);
+    // ========= COLLECT SIGNALS =========
+    let score = 0;
+    const reasons: string[] = [];
 
-    // Record fingerprint in database
+    // --- Signal 1: Shared fingerprint ---
     const fpRef = ref(db, `fingerprints/${fingerprint}`);
     const fpSnap = await get(fpRef);
-
     let associatedUsers: string[] = [];
     if (fpSnap.exists()) {
       associatedUsers = fpSnap.val().users || [];
@@ -66,21 +70,76 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!associatedUsers.includes(uid)) {
       associatedUsers.push(uid);
     }
-    await set(fpRef, {
-      users: associatedUsers,
-      lastSeen: Date.now()
-    });
+    await set(fpRef, { users: associatedUsers, lastSeen: Date.now() });
 
-    // If multiple accounts from same device — flag all
-    const isSuspicious = associatedUsers.length > 1 || otherUsers.length > 0;
+    const otherFpUsers = associatedUsers.filter(id => id !== uid);
+    if (otherFpUsers.length >= 2) {
+      score += 50;
+      reasons.push(`fingerprint_3plus (${otherFpUsers.length + 1} акк.)`);
+    } else if (otherFpUsers.length === 1) {
+      score += 30;
+      reasons.push('fingerprint_shared (2 акк.)');
+    }
 
+    // --- Signal 2: localStorage has other UIDs ---
+    const localUserIds = getStoredUserIds();
+    const otherLocalUsers = localUserIds.filter(id => id !== uid);
+    if (otherLocalUsers.length > 0) {
+      score += 25;
+      reasons.push(`localStorage_uids (${otherLocalUsers.length} чужих)`);
+    }
+
+    // --- Signal 3: Rapid account creation (within 24h) ---
+    if (isNewAccount) {
+      const timestamps = getCreationTimestamps();
+      const now = Date.now();
+      const recentCreations = timestamps.filter(ts => now - ts < 24 * 60 * 60 * 1000);
+      if (recentCreations.length > 1) {
+        score += 20;
+        reasons.push(`rapid_creation (${recentCreations.length} за 24ч)`);
+      }
+    }
+
+    // --- Signal 4: Identical screen + timezone (weak signal) ---
+    const signals = getDeviceSignals();
+    const signalKey = `${signals.screenRes}_${signals.timezone}_${signals.hardwareConcurrency}`;
+    const signalRef = ref(db, `deviceSignals/${btoa(signalKey).replace(/[.#$/[\]]/g, '_')}`);
+    const signalSnap = await get(signalRef);
+    let signalUsers: string[] = [];
+    if (signalSnap.exists()) {
+      signalUsers = signalSnap.val().users || [];
+    }
+    if (!signalUsers.includes(uid)) {
+      signalUsers.push(uid);
+    }
+    await set(signalRef, { users: signalUsers, signals: signalKey, lastSeen: Date.now() });
+
+    if (signalUsers.filter(id => id !== uid).length > 0) {
+      score += 5;
+      reasons.push('device_signals_match');
+    }
+
+    // ========= APPLY THRESHOLD =========
+    const isSuspicious = score >= SUSPICIOUS_THRESHOLD;
+
+    await set(ref(db, `users/${uid}/suspiciousFlag`), isSuspicious);
+    await set(ref(db, `users/${uid}/suspiciousScore`), score);
+    await set(ref(db, `users/${uid}/suspiciousReasons`), reasons);
+
+    // If flagged, also flag associated accounts with recalculated scores
     if (isSuspicious) {
-      // Flag current user
-      await set(ref(db, `users/${uid}/suspiciousFlag`), true);
-      // Flag all associated users
-      for (const associatedUid of associatedUsers) {
-        if (associatedUid !== uid) {
-          await set(ref(db, `users/${associatedUid}/suspiciousFlag`), true);
+      for (const associatedUid of otherFpUsers) {
+        const assocRef = ref(db, `users/${associatedUid}`);
+        const assocSnap = await get(assocRef);
+        if (assocSnap.exists()) {
+          const assocData = assocSnap.val();
+          // Only escalate, don't de-escalate
+          const existingScore = assocData.suspiciousScore || 0;
+          if (score > existingScore) {
+            await set(ref(db, `users/${associatedUid}/suspiciousFlag`), true);
+            await set(ref(db, `users/${associatedUid}/suspiciousScore`), score);
+            await set(ref(db, `users/${associatedUid}/suspiciousReasons`), reasons);
+          }
         }
       }
     }
@@ -118,10 +177,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       createdAt: Date.now(),
       fingerprint: fp,
       linkedFingerprints: [fp],
-      suspiciousFlag: false
+      suspiciousFlag: false,
+      suspiciousScore: 0,
+      suspiciousReasons: []
     });
 
-    await checkAntiCheat(cred.user.uid, fp);
+    await checkAntiCheat(cred.user.uid, fp, true);
   }
 
   async function loginWithGoogle() {
@@ -147,11 +208,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         createdAt: Date.now(),
         fingerprint: fp,
         linkedFingerprints: [fp],
-        suspiciousFlag: false
+        suspiciousFlag: false,
+        suspiciousScore: 0,
+        suspiciousReasons: []
       });
+      await checkAntiCheat(cred.user.uid, fp, true);
+    } else {
+      await checkAntiCheat(cred.user.uid, fp);
     }
-
-    await checkAntiCheat(cred.user.uid, fp);
   }
 
   async function logout() {

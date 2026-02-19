@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ref, onValue, push } from 'firebase/database';
+import { ref, onValue, push, set } from 'firebase/database';
 import { db } from '@/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -28,6 +28,29 @@ export default function Profile() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [activeTab, setActiveTab] = useState<'tests' | 'messages'>('tests');
+  const [editingName, setEditingName] = useState(false);
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [savingName, setSavingName] = useState(false);
+
+  const startEditName = () => {
+    setEditFirstName(userProfile?.firstName || '');
+    setEditLastName(userProfile?.lastName || '');
+    setEditingName(true);
+  };
+
+  const saveName = async () => {
+    if (!currentUser || !editFirstName.trim() || !editLastName.trim()) return;
+    setSavingName(true);
+    try {
+      await set(ref(db, `users/${currentUser.uid}/firstName`), editFirstName.trim());
+      await set(ref(db, `users/${currentUser.uid}/lastName`), editLastName.trim());
+      setEditingName(false);
+    } catch (e) {
+      console.error('Failed to save name:', e);
+    }
+    setSavingName(false);
+  };
 
   useEffect(() => {
     if (!currentUser) { navigate('/login'); return; }
@@ -102,9 +125,39 @@ export default function Profile() {
               {userProfile.firstName.charAt(0)}{userProfile.lastName.charAt(0)}
             </div>
             <div className="flex-1">
-              <h1 className="text-xl font-bold" style={{ color: 'var(--text-100)' }}>
-                {userProfile.firstName} {userProfile.lastName}
-              </h1>
+              {editingName ? (
+                <div className="flex flex-col gap-2">
+                  <div className="flex gap-2">
+                    <input value={editFirstName} onChange={(e) => setEditFirstName(e.target.value)}
+                      placeholder="Имя" className="px-3 py-1.5 rounded-lg text-sm bg-transparent outline-none"
+                      style={{ border: '1px solid var(--border)', color: 'var(--text-100)', width: '140px' }} />
+                    <input value={editLastName} onChange={(e) => setEditLastName(e.target.value)}
+                      placeholder="Фамилия" className="px-3 py-1.5 rounded-lg text-sm bg-transparent outline-none"
+                      style={{ border: '1px solid var(--border)', color: 'var(--text-100)', width: '140px' }} />
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={saveName} disabled={savingName || !editFirstName.trim() || !editLastName.trim()}
+                      className="text-[11px] px-3 py-1 rounded-lg font-medium text-white disabled:opacity-40"
+                      style={{ background: 'var(--accent)' }}>
+                      {savingName ? '...' : '✓ Сохранить'}
+                    </button>
+                    <button onClick={() => setEditingName(false)} className="text-[11px] px-3 py-1 rounded-lg"
+                      style={{ border: '1px solid var(--border)', color: 'var(--text-500)' }}>
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-bold" style={{ color: 'var(--text-100)' }}>
+                    {userProfile.firstName} {userProfile.lastName}
+                  </h1>
+                  <button onClick={startEditName} className="text-[11px] px-2 py-0.5 rounded-md transition-all hover:opacity-80"
+                    style={{ border: '1px solid var(--border)', color: 'var(--text-600)' }} title="Редактировать имя">
+                    ✏️
+                  </button>
+                </div>
+              )}
               <p className="text-sm mt-0.5" style={{ color: 'var(--text-500)' }}>{userProfile.email}</p>
               <div className="flex flex-wrap gap-2 mt-3">
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-md" style={{ color: 'var(--text-600)', border: '1px solid var(--border)' }}>
@@ -116,8 +169,9 @@ export default function Profile() {
                   </span>
                 )}
                 {userProfile.suspiciousFlag && (
-                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-md" style={{ color: 'var(--red)', background: 'var(--red-bg)', border: '1px solid var(--red-border)' }}>
-                    ⚠ Подозрительная активность
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-md" style={{ color: 'var(--red)', background: 'var(--red-bg)', border: '1px solid var(--red-border)' }}
+                    title={`Очки: ${userProfile.suspiciousScore || 0}. ${(userProfile.suspiciousReasons || []).join(', ')}`}>
+                    ⚠ Подозрительная активность ({userProfile.suspiciousScore || 0})
                   </span>
                 )}
               </div>
