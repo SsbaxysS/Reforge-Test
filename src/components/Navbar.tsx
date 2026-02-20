@@ -1,12 +1,11 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Sun, Moon, Sparkles, LogOut, ArrowRight, LogIn } from 'lucide-react';
+import { Sun, Moon, LogOut, ArrowRight, LogIn } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme, type Theme } from '@/contexts/ThemeContext';
 
 const themes: { value: Theme; icon: any; label: string }[] = [
   { value: 'light', icon: Sun, label: 'Светлая' },
   { value: 'dark', icon: Moon, label: 'Тёмная' },
-  { value: 'black', icon: Sparkles, label: 'Глубокий чёрный' },
 ];
 
 export default function Navbar() {

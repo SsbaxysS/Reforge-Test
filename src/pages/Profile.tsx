@@ -13,6 +13,7 @@ interface TestResult {
   maxScore: number;
   completedAt: number;
   fingerprint: string;
+  timeTaken?: number;
 }
 
 interface Message {
@@ -245,6 +246,7 @@ export default function Profile() {
                         <h3 className="font-semibold text-[15px]" style={{ color: 'var(--text-100)' }}>{result.testName}</h3>
                         <p className="text-[12px] mt-0.5" style={{ color: 'var(--text-600)' }}>
                           {new Date(result.completedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          {result.timeTaken !== undefined && ` · ⏱ ${Math.floor(result.timeTaken / 60)}:${(result.timeTaken % 60).toString().padStart(2, '0')}`}
                         </p>
                       </div>
                       <div className="text-right">

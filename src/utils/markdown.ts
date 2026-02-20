@@ -4,12 +4,19 @@ function escapeHtml(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function processInline(text: string): string {
+function processInline(text: string, images?: Record<string, { name: string, data: string }>): string {
     let r = text;
     // Escape backslash sequences
     r = r.replace(/\\([\\`*_{}[\]()#+\-.!~|])/g, (_, ch) => `&#${ch.charCodeAt(0)};`);
-    // Images
-    r = r.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g, '<img src="$2" alt="$1" title="$3" class="md-img" />');
+    // Images with db-image support
+    r = r.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g, (_match, alt, url, title) => {
+        let src = url;
+        if (url.startsWith('db-image://') && images) {
+            const id = url.replace('db-image://', '');
+            if (images[id]) src = images[id].data;
+        }
+        return `<img src="${src}" alt="${alt}" title="${title || ''}" class="md-img" />`;
+    });
     // Links
     r = r.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g, '<a href="$2" title="$3" target="_blank" rel="noopener" class="md-link">$1</a>');
     // Auto-links
@@ -31,7 +38,7 @@ function processInline(text: string): string {
     return r;
 }
 
-function processTable(lines: string[]): string {
+function processTable(lines: string[], images?: Record<string, { name: string, data: string }>): string {
     if (lines.length < 2) return '';
     const headerCells = lines[0].split('|').map(c => c.trim()).filter(Boolean);
     const alignLine = lines[1];
@@ -42,14 +49,14 @@ function processTable(lines: string[]): string {
     });
     let html = '<table class="md-table"><thead><tr>';
     headerCells.forEach((c, i) => {
-        html += `<th style="text-align:${aligns[i] || 'left'}">${processInline(c)}</th>`;
+        html += `<th style="text-align:${aligns[i] || 'left'}">${processInline(c, images)}</th>`;
     });
     html += '</tr></thead><tbody>';
     for (let i = 2; i < lines.length; i++) {
         const cells = lines[i].split('|').map(c => c.trim()).filter(Boolean);
         html += '<tr>';
         cells.forEach((c, j) => {
-            html += `<td style="text-align:${aligns[j] || 'left'}">${processInline(c)}</td>`;
+            html += `<td style="text-align:${aligns[j] || 'left'}">${processInline(c, images)}</td>`;
         });
         html += '</tr>';
     }
@@ -57,7 +64,7 @@ function processTable(lines: string[]): string {
     return html;
 }
 
-export function renderMarkdown(md: string): string {
+export function renderMarkdown(md: string, images?: Record<string, { name: string, data: string }>): string {
     if (!md) return '';
     const lines = md.split('\n');
     const blocks: string[] = [];
@@ -88,7 +95,7 @@ export function renderMarkdown(md: string): string {
                 tableLines.push(lines[i]);
                 i++;
             }
-            blocks.push(processTable(tableLines));
+            blocks.push(processTable(tableLines, images));
             continue;
         }
 
@@ -104,7 +111,7 @@ export function renderMarkdown(md: string): string {
         if (headMatch) {
             const level = headMatch[1].length;
             const id = headMatch[3] || '';
-            blocks.push(`<h${level} class="md-h${level}" ${id ? `id="${escapeHtml(id)}"` : ''}>${processInline(headMatch[2])}</h${level}>`);
+            blocks.push(`<h${level} class="md-h${level}" ${id ? `id="${escapeHtml(id)}"` : ''}>${processInline(headMatch[2], images)}</h${level}>`);
             i++;
             continue;
         }
@@ -116,7 +123,7 @@ export function renderMarkdown(md: string): string {
                 quoteLines.push(lines[i].replace(/^>\s?/, ''));
                 i++;
             }
-            blocks.push(`<blockquote class="md-blockquote">${renderMarkdown(quoteLines.join('\n'))}</blockquote>`);
+            blocks.push(`<blockquote class="md-blockquote">${renderMarkdown(quoteLines.join('\n'), images)}</blockquote>`);
             continue;
         }
 
@@ -127,7 +134,7 @@ export function renderMarkdown(md: string): string {
                 const m = lines[i].match(/^[-*+]\s+\[([ xX])\]\s*(.*)/);
                 if (m) {
                     const checked = m[1] !== ' ';
-                    items.push(`<li class="md-task"><input type="checkbox" ${checked ? 'checked' : ''} disabled />${processInline(m[2])}</li>`);
+                    items.push(`<li class="md-task"><input type="checkbox" ${checked ? 'checked' : ''} disabled />${processInline(m[2], images)}</li>`);
                 }
                 i++;
             }
@@ -139,7 +146,7 @@ export function renderMarkdown(md: string): string {
         if (/^[-*+]\s+/.test(line)) {
             const items: string[] = [];
             while (i < lines.length && /^[-*+]\s+/.test(lines[i])) {
-                items.push(`<li>${processInline(lines[i].replace(/^[-*+]\s+/, ''))}</li>`);
+                items.push(`<li>${processInline(lines[i].replace(/^[-*+]\s+/, ''), images)}</li>`);
                 i++;
             }
             blocks.push(`<ul class="md-ul">${items.join('')}</ul>`);
@@ -150,7 +157,7 @@ export function renderMarkdown(md: string): string {
         if (/^\d+\.\s+/.test(line)) {
             const items: string[] = [];
             while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
-                items.push(`<li>${processInline(lines[i].replace(/^\d+\.\s+/, ''))}</li>`);
+                items.push(`<li>${processInline(lines[i].replace(/^\d+\.\s+/, ''), images)}</li>`);
                 i++;
             }
             blocks.push(`<ol class="md-ol">${items.join('')}</ol>`);
@@ -170,7 +177,7 @@ export function renderMarkdown(md: string): string {
             paraLines.push(lines[i]);
             i++;
         }
-        blocks.push(`<p class="md-p">${processInline(paraLines.join('\n'))}</p>`);
+        blocks.push(`<p class="md-p">${processInline(paraLines.join('\n'), images)}</p>`);
     }
 
     return blocks.join('\n');

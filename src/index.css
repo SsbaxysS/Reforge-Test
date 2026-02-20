@@ -27,12 +27,6 @@ body {
   color: #18181b;
 }
 
-[data-theme="black"] body,
-[data-theme="black"] {
-  background: #000000;
-  color: #e4e4e7;
-}
-
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(139, 92, 246, 0.15) transparent;

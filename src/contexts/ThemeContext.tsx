@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 
-export type Theme = 'light' | 'dark' | 'black';
+export type Theme = 'light' | 'dark';
 
 interface ThemeContextType {
   theme: Theme;
@@ -19,7 +19,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
     try {
       const saved = localStorage.getItem('rf_theme');
-      if (saved === 'light' || saved === 'dark' || saved === 'black') return saved;
+      if (saved === 'light' || saved === 'dark') return saved;
     } catch { /* ignore */ }
     return 'dark';
   });

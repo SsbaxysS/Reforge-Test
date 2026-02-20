@@ -21,6 +21,14 @@ interface AdminNotification {
   read: boolean;
 }
 
+interface Message {
+  id: string;
+  from: string;
+  fromName: string;
+  text: string;
+  timestamp: number;
+}
+
 export default function AdminPanel() {
   const { currentUser, userProfile } = useAuth();
   const navigate = useNavigate();
@@ -39,6 +47,7 @@ export default function AdminPanel() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
+  const [activeMessages, setActiveMessages] = useState<Message[]>([]);
   const [showUserDetail, setShowUserDetail] = useState<UserProfile | null>(null);
   const [editingTest, setEditingTest] = useState<Test | null | 'new'>(null);
   const [viewSubmissions, setViewSubmissions] = useState<string | null>(null);
@@ -82,6 +91,29 @@ export default function AdminPanel() {
     return () => { unsubUsers(); unsubFp(); unsubNotif(); unsubTests(); unsubSub(); };
   }, [currentUser, userProfile, navigate]);
 
+  useEffect(() => {
+    if (!selectedUser) {
+      setActiveMessages([]);
+      return;
+    }
+    const msgRef = ref(db, `messages/${selectedUser}`);
+    const unsubMsg = onValue(msgRef, snap => {
+      if (snap.exists()) {
+        const arr: Message[] = Object.entries(snap.val()).map(([id, val]) => ({ id, ...(val as Omit<Message, 'id'>) }));
+        arr.sort((a, b) => a.timestamp - b.timestamp);
+        setActiveMessages(arr);
+
+        // Auto mark notifications from this user as read
+        notifications.filter(n => n.userId === selectedUser && !n.read).forEach(n => {
+          markRead(n.id);
+        });
+      } else {
+        setActiveMessages([]);
+      }
+    });
+    return () => unsubMsg();
+  }, [selectedUser, notifications]);
+
   const filteredUsers = users.filter(u =>
     `${u.firstName} ${u.lastName} ${u.email} ${u.uid}`.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -105,7 +137,6 @@ export default function AdminPanel() {
     try {
       await push(ref(db, `messages/${userId}`), { from: 'admin', fromName: 'Учитель', text: replyText.trim(), timestamp: Date.now() });
       setReplyText('');
-      toast.success('Сообщение отправлено');
     } catch (e) { toast.error('Ошибка отправки'); }
   };
   const markRead = async (id: string) => { await set(ref(db, `adminNotifications/${id}/read`), true); };
@@ -303,7 +334,7 @@ export default function AdminPanel() {
           {stage.content && (
             <div className="rounded-xl p-5 mb-6 markdown-content"
               style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(stage.content) }} />
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(stage.content, previewTest.images) }} />
           )}
 
           {/* Questions */}
@@ -317,7 +348,7 @@ export default function AdminPanel() {
                   </span>
                   <div className="flex-1">
                     <div className="markdown-content text-sm" style={{ color: 'var(--text-200)' }}
-                      dangerouslySetInnerHTML={{ __html: renderMarkdown(q.text) }} />
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(q.text, previewTest.images) }} />
                     {previewTest.gradingMode === 'auto-complex' && (
                       <span className="text-[10px] mt-1 inline-block" style={{ color: 'var(--text-600)' }}>{q.points} б.</span>
                     )}
@@ -600,7 +631,7 @@ export default function AdminPanel() {
                   <table className="w-full">
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                        {['Ученик', 'Класс', 'Дата', 'Баллы', 'Оценка', ''].map((h, i) => (
+                        {['Ученик', 'Класс', 'Дата', 'Время', 'Баллы', 'Оценка', ''].map((h, i) => (
                           <th key={i} className="text-left px-4 py-3 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-600)' }}>{h}</th>
                         ))}
                       </tr>
@@ -613,6 +644,9 @@ export default function AdminPanel() {
                             <td className="px-4 py-3 text-sm" style={{ color: 'var(--text-200)' }}>{sub.studentName} {sub.studentLastName}</td>
                             <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-500)' }}>{sub.studentClass}</td>
                             <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-600)' }}>{new Date(sub.submittedAt).toLocaleString('ru-RU')}</td>
+                            <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--text-200)' }}>
+                              {sub.timeTaken !== undefined ? `${Math.floor(sub.timeTaken / 60)}:${(sub.timeTaken % 60).toString().padStart(2, '0')}` : '—'}
+                            </td>
                             <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--text-200)' }}>
                               {sub.score !== undefined ? `${sub.score}/${sub.maxScore}` : '—'}
                             </td>
@@ -722,49 +756,127 @@ export default function AdminPanel() {
 
         {/* ===== MESSAGES TAB ===== */}
         {activeTab === 'messages' && (
-          <div className="space-y-3 animate-fade-in-up">
-            {notifications.length === 0 ? (
-              <div className="rounded-2xl p-12 text-center" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
-                <div className="text-4xl mb-3">💬</div>
-                <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--text-200)' }}>Нет сообщений</h3>
-              </div>
-            ) : (
-              notifications.map(n => (
-                <div key={n.id} className="glow-card rounded-2xl p-4 transition-all"
-                  style={{ border: `1px solid ${n.read ? 'var(--border)' : 'var(--accent-border)'}`, background: n.read ? 'var(--bg-card)' : 'var(--bg-card-hover)' }}>
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[10px] font-bold" style={{ background: 'var(--accent)' }}>
-                        {n.userName?.charAt(0) || '?'}
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium" style={{ color: 'var(--text-100)' }}>{n.userName}</div>
-                        <div className="text-[10px]" style={{ color: 'var(--text-600)' }}>{new Date(n.timestamp).toLocaleString('ru-RU')}</div>
-                      </div>
+          <div className="flex flex-col md:flex-row gap-4 h-[600px] animate-fade-in-up">
+            {/* Sidebar: Users with notifications */}
+            <div className="w-full md:w-1/3 flex flex-col gap-2 overflow-y-auto pr-2">
+              <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--text-100)' }}>Диалоги</h3>
+              {(() => {
+                // Group users that have notifications (or are currently selected)
+                const userIds = new Set<string>();
+                notifications.forEach(n => userIds.add(n.userId));
+                if (selectedUser) userIds.add(selectedUser);
+
+                const activeUserIds = Array.from(userIds);
+
+                if (activeUserIds.length === 0) {
+                  return (
+                    <div className="rounded-2xl p-6 text-center" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+                      <div className="text-2xl mb-2">💬</div>
+                      <h3 className="text-xs font-semibold" style={{ color: 'var(--text-200)' }}>Нет диалогов</h3>
                     </div>
-                    {!n.read && (
-                      <button onClick={() => markRead(n.id)} className="text-[10px] px-2 py-0.5 rounded" style={{ color: 'var(--accent-light)', background: 'var(--accent-bg)' }}>
-                        Прочитано
+                  );
+                }
+
+                return activeUserIds.map(uid => {
+                  const u = users.find(user => user.uid === uid);
+                  const unreadCount = notifications.filter(n => n.userId === uid && !n.read).length;
+                  const isSelected = selectedUser === uid;
+
+                  return (
+                    <button key={uid} onClick={() => setSelectedUser(uid)}
+                      className="w-full text-left p-3 rounded-xl transition-all flex items-center justify-between"
+                      style={{
+                        border: `1px solid ${isSelected ? 'var(--accent-border)' : 'var(--border)'}`,
+                        background: isSelected ? 'var(--accent-bg)' : 'var(--bg-card)',
+                      }}>
+                      <div className="flex items-center gap-3 truncate">
+                        <div className="w-8 h-8 rounded-lg flex shrink-0 items-center justify-center text-white text-[10px] font-bold"
+                          style={{ background: isSelected ? 'var(--accent)' : 'var(--text-400)' }}>
+                          {u ? `${u.firstName?.charAt(0)}${u.lastName?.charAt(0)}` : '?'}
+                        </div>
+                        <div className="truncate">
+                          <div className="text-sm font-medium truncate" style={{ color: 'var(--text-100)' }}>
+                            {u ? `${u.firstName} ${u.lastName}` : 'Неизвестный'}
+                          </div>
+                          {u && <div className="text-[10px] truncate" style={{ color: 'var(--text-500)' }}>{u.email}</div>}
+                        </div>
+                      </div>
+                      {unreadCount > 0 && (
+                        <div className="w-5 h-5 rounded-md flex shrink-0 items-center justify-center text-[10px] font-bold text-white ml-2"
+                          style={{ background: 'var(--accent)' }}>
+                          {unreadCount}
+                        </div>
+                      )}
+                    </button>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Main Chat Area */}
+            <div className="w-full md:w-2/3 flex flex-col rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+              {selectedUser ? (() => {
+                const u = users.find(user => user.uid === selectedUser);
+                return (
+                  <>
+                    <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-card-hover)' }}>
+                      <div className="font-semibold text-sm" style={{ color: 'var(--text-100)' }}>
+                        {u ? `${u.firstName} ${u.lastName}` : 'Чат'}
+                      </div>
+                      <button onClick={() => setSelectedUser(null)} className="text-[12px] px-2 py-1 rounded-lg" style={{ color: 'var(--text-500)', border: '1px solid var(--border)' }}>
+                        Закрыть
                       </button>
-                    )}
-                  </div>
-                  <p className="text-sm ml-11 mb-3" style={{ color: 'var(--text-400)' }}>{n.text}</p>
-                  {selectedUser === n.userId ? (
-                    <div className="flex gap-2 ml-11">
-                      <input type="text" value={replyText} onChange={e => setReplyText(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') { sendReply(n.userId); setSelectedUser(null); } }}
-                        placeholder="Ответ..." className="flex-1 px-3 py-2 rounded-lg text-sm focus:outline-none" style={inputStyle} autoFocus />
-                      <button onClick={() => { sendReply(n.userId); setSelectedUser(null); }}
-                        className="px-3 py-2 text-white text-sm rounded-lg" style={{ background: 'var(--accent)' }}>↑</button>
-                      <button onClick={() => setSelectedUser(null)} className="px-2 py-2 text-sm rounded-lg" style={{ color: 'var(--text-600)' }}>✕</button>
                     </div>
-                  ) : (
-                    <button onClick={() => { setSelectedUser(n.userId); setReplyText(''); }}
-                      className="text-[11px] ml-11" style={{ color: 'var(--accent-light)' }}>↩ Ответить</button>
-                  )}
+
+                    <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-3">
+                      {activeMessages.length === 0 ? (
+                        <div className="m-auto text-center">
+                          <div className="text-2xl mb-2">👋</div>
+                          <div className="text-xs" style={{ color: 'var(--text-500)' }}>История сообщений пуста</div>
+                        </div>
+                      ) : (
+                        activeMessages.map(msg => {
+                          const isAdmin = msg.from === 'admin';
+                          return (
+                            <div key={msg.id} className={`flex flex-col max-w-[80%] ${isAdmin ? 'self-end bg-[var(--accent)] text-white' : 'self-start bg-[var(--bg-card-hover)] text-[var(--text-200)]'} rounded-2xl p-3 shadow-sm`}
+                              style={{ border: isAdmin ? 'none' : '1px solid var(--border)' }}>
+                              <div className="text-[10px] mb-1 opacity-70 font-medium">
+                                {isAdmin ? 'Вы' : msg.fromName}
+                              </div>
+                              <div className="text-sm whitespace-pre-wrap leading-relaxed">{msg.text}</div>
+                              <div className="text-[9px] mt-1 text-right opacity-50">
+                                {new Date(msg.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div className="p-3" style={{ borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
+                      <div className="flex gap-2 relative">
+                        <input type="text" value={replyText} onChange={e => setReplyText(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') { sendReply(selectedUser); } }}
+                          placeholder="Написать сообщение..."
+                          className="flex-1 px-4 py-3 rounded-xl text-sm focus:outline-none"
+                          style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-200)' }} />
+                        <button onClick={() => sendReply(selectedUser)}
+                          className="px-4 py-3 text-white text-sm rounded-xl font-medium transition-transform active:scale-95"
+                          style={{ background: 'var(--accent)' }}>
+                          Отправить
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                );
+              })() : (
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
+                  <div className="text-4xl mb-3 opacity-50">👈</div>
+                  <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--text-200)' }}>Выберите диалог</h3>
+                  <p className="text-[12px]" style={{ color: 'var(--text-500)' }}>Нажмите на ученика слева, чтобы прочитать его сообщения и ответить.</p>
                 </div>
-              ))
-            )}
+              )}
+            </div>
           </div>
         )}
       </div>

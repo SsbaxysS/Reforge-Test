@@ -117,7 +117,9 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
     const [description] = useState(test?.description || '');
     const [gradingMode, setGradingMode] = useState<GradingMode>(test?.gradingMode || 'auto-simple');
     const [published, setPublished] = useState(test?.published ?? false);
+    const [timeLimit, setTimeLimit] = useState<number>(test?.timeLimit || 0);
     const [stages, setStages] = useState<TestStage[]>(test?.stages || [createEmptyStage()]);
+    const [images, setImages] = useState<Record<string, { name: string, data: string }>>(test?.images || {});
     const [activeStage, setActiveStage] = useState(0);
     const [saving, setSaving] = useState(false);
     const [showPreview, setShowPreview] = useState(false);
@@ -163,10 +165,11 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
     // Handle keyboard shortcuts
     const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>, ta: HTMLTextAreaElement | null) => {
         if (e.ctrlKey || e.metaKey) {
-            const key = e.key.toLowerCase();
-            if (SHORTCUTS[key]) {
+            const code = e.code.replace('Key', '').toLowerCase();
+            const keyToUse = SHORTCUTS[code] || SHORTCUTS[e.key.toLowerCase()];
+            if (keyToUse) {
                 e.preventDefault();
-                insertFormat(ta, SHORTCUTS[key]);
+                insertFormat(ta, keyToUse);
             }
         }
         // Tab key for indent
@@ -205,7 +208,9 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
         if (!file.type.startsWith('image/')) { toast.error('Допускаются только изображения'); return; }
         try {
             const dataUrl = await compressImage(file);
-            const md = `![${file.name}](${dataUrl})`;
+            const id = generateId();
+            setImages(prev => ({ ...prev, [id]: { name: file.name, data: dataUrl } }));
+            const md = `![${file.name}](db-image://${id})`;
             const start = target.selectionStart;
             const val = target.value;
             const newVal = val.substring(0, start) + md + val.substring(target.selectionEnd);
@@ -270,7 +275,7 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
 
     const setCorrectOption = (qIdx: number, oIdx: number) => {
         const q = stages[activeStage].questions[qIdx];
-        const opts = q.options.map((o, i) => ({ ...o, correct: i === oIdx }));
+        const opts = q.options.map((o, i) => i === oIdx ? { ...o, correct: !o.correct } : o);
         updateQuestion(qIdx, { options: opts });
     };
 
@@ -300,7 +305,9 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
                 updatedAt: Date.now(),
                 gradingMode,
                 published,
+                timeLimit: timeLimit > 0 ? timeLimit : undefined,
                 stages,
+                images,
             };
             await onSave(t);
         } catch {
@@ -346,8 +353,13 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
                             <option value="manual">Ручной</option>
                         </select>
                     </div>
+                    <div>
+                        <label className="block text-[10px] uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-600)' }}>Время на тест (мин)</label>
+                        <input type="number" min="0" value={timeLimit || ''} onChange={e => setTimeLimit(Number(e.target.value))}
+                            placeholder="Без таймера" className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={inputStyle} />
+                    </div>
                     <div className="flex items-end">
-                        <label className="flex items-center gap-2 cursor-pointer">
+                        <label className="flex items-center gap-2 cursor-pointer pb-2">
                             <input type="checkbox" checked={published} onChange={e => setPublished(e.target.checked)}
                                 className="w-4 h-4 rounded" />
                             <span className="text-sm" style={{ color: 'var(--text-400)' }}>Опубликован</span>
@@ -376,16 +388,16 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
                     </div>
                     <div className="font-semibold mt-3 mb-2" style={{ color: 'var(--text-200)' }}>Синтаксис Markdown</div>
                     <div className="grid grid-cols-2 gap-x-6 gap-y-1" style={{ color: 'var(--text-500)' }}>
-                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>**жирный**</code> → <strong>жирный</strong></span>
-                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>*курсив*</code> → <em>курсив</em></span>
-                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>~~зачёркнутый~~</code> → <del>зачёркнутый</del></span>
-                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>`код`</code> → <code>код</code></span>
-                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}># Заголовок</code> — H1-H6</span>
-                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>[текст](url)</code> — ссылка</span>
-                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>![alt](url)</code> — изображение</span>
-                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>&gt; цитата</code> — блок цитаты</span>
-                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>---</code> — разделитель</span>
-                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>- [ ] задача</code> — чекбокс</span>
+                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>**жирный**</code></span>
+                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>*курсив*</code></span>
+                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>~~зачёркнутый~~</code></span>
+                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>`код`</code></span>
+                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}># Заголовок</code></span>
+                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>[текст](url)</code></span>
+                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>![alt](url)</code></span>
+                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>&gt; цитата</code></span>
+                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>---</code></span>
+                        <span><code className="font-mono" style={{ color: 'var(--accent-light)' }}>- [ ] задача</code></span>
                     </div>
                     <p className="mt-2" style={{ color: 'var(--text-600)' }}>Правый клик по полю ввода — меню форматирования. Перетащите изображение на поле для вставки.</p>
                 </div>
@@ -401,7 +413,7 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
                             : { border: '1px solid var(--border)', color: 'var(--text-500)', background: 'var(--bg-card)' }
                         }>
                         {s.title || `Этап ${i + 1}`}
-                        {stages.length > 1 && (
+                        {stages.length > 1 && i > 0 && (
                             <span onClick={e => { e.stopPropagation(); removeStage(i); }}
                                 className="opacity-0 group-hover:opacity-100 ml-1 transition-opacity" style={{ color: i === activeStage ? 'rgba(255,255,255,0.6)' : 'var(--text-700)' }}>
                                 ×
@@ -473,7 +485,7 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
 
                 {showPreview ? (
                     <div className="min-h-[200px] p-4 rounded-xl markdown-content" style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}
-                        dangerouslySetInnerHTML={{ __html: renderMarkdown(stg.content) }} />
+                        dangerouslySetInnerHTML={{ __html: renderMarkdown(stg.content, images) }} />
                 ) : (
                     <textarea
                         ref={contentRef}

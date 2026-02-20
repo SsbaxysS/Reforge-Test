@@ -32,6 +32,8 @@ export interface Test {
     gradingMode: GradingMode;
     published: boolean;
     stages: TestStage[];
+    images?: Record<string, { name: string, data: string }>;
+    timeLimit?: number;
 }
 
 export interface TestSubmission {
@@ -42,12 +44,14 @@ export interface TestSubmission {
     studentClass: string;
     fingerprint: string;
     submittedAt: number;
-    answers: Record<string, string | number>; // questionId -> answer
+    userId?: string;
+    answers: Record<string, string | number | number[]>; // questionId -> answer
     score?: number;
     maxScore?: number;
     graded: boolean;
     grade?: number; // 2-5
     teacherComments?: Record<string, string>;
+    timeTaken?: number;
 }
 
 export function generateId(): string {

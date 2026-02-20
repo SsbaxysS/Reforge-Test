@@ -58,7 +58,7 @@ function AppRoutes() {
 
       <AnimatePresence mode="wait">
         <Routes location={location} key={location.pathname}>
-          <Route path="/test/:testId" element={<PageTransition><TestPage /></PageTransition>} />
+          <Route path="/test/:testId" element={<ProtectedRoute><PageTransition><TestPage /></PageTransition></ProtectedRoute>} />
           <Route path="/" element={<PageTransition><Home /></PageTransition>} />
           <Route path="/login" element={<GuestRoute><PageTransition><Login /></PageTransition></GuestRoute>} />
           <Route path="/register" element={<GuestRoute><PageTransition><Register /></PageTransition></GuestRoute>} />

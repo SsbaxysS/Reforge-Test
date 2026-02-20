@@ -6,6 +6,7 @@ import type { Test, TestSubmission } from '@/types/test';
 import { calcGrade } from '@/types/test';
 import { renderMarkdown } from '@/utils/markdown';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
 
 type Phase = 'intro' | 'test' | 'result';
 
@@ -15,17 +16,23 @@ export default function TestPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
+    const { currentUser, userProfile } = useAuth();
+
     // Student info
-    const [studentName, setStudentName] = useState('');
-    const [studentLastName, setStudentLastName] = useState('');
+    const studentName = userProfile?.firstName || '';
+    const studentLastName = userProfile?.lastName || '';
     const [studentClass, setStudentClass] = useState('');
 
     // Test state
     const [phase, setPhase] = useState<Phase>('intro');
     const [currentStage, setCurrentStage] = useState(0);
-    const [answers, setAnswers] = useState<Record<string, string | number>>({});
+    const [answers, setAnswers] = useState<Record<string, string | number | number[]>>({});
     const [submitting, setSubmitting] = useState(false);
     const [result, setResult] = useState<{ score: number; maxScore: number; grade: number } | null>(null);
+
+    // Timer state
+    const [startedAt, setStartedAt] = useState<number>(0);
+    const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
     // Load test
     useEffect(() => {
@@ -43,11 +50,44 @@ export default function TestPage() {
     const startTest = () => {
         if (!studentName.trim() || !studentLastName.trim() || !studentClass.trim()) { setError('Заполните все поля'); return; }
         setError('');
+        setStartedAt(Date.now());
+        if (test?.timeLimit) {
+            setTimeLeft(test.timeLimit * 60);
+        }
         setPhase('test');
+    };
+
+    // Timer tick
+    useEffect(() => {
+        if (phase !== 'test' || timeLeft === null) return;
+        if (timeLeft <= 0) {
+            submitTest();
+            return;
+        }
+        const timerId = setInterval(() => {
+            setTimeLeft(prev => prev !== null ? prev - 1 : null);
+        }, 1000);
+        return () => clearInterval(timerId);
+    }, [phase, timeLeft]);
+
+    const formatTime = (seconds: number) => {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${m}:${s.toString().padStart(2, '0')}`;
     };
 
     const setAnswer = (questionId: string, value: string | number) => {
         setAnswers(prev => ({ ...prev, [questionId]: value }));
+    };
+
+    const toggleMultiAnswer = (questionId: string, optionIdx: number) => {
+        setAnswers(prev => {
+            const current = (prev[questionId] as number[]) || [];
+            if (current.includes(optionIdx)) {
+                return { ...prev, [questionId]: current.filter(i => i !== optionIdx) };
+            }
+            return { ...prev, [questionId]: [...current, optionIdx] };
+        });
     };
 
     const allAnswered = () => {
@@ -55,7 +95,7 @@ export default function TestPage() {
         for (const stage of test.stages) {
             for (const q of stage.questions) {
                 const a = answers[q.id];
-                if (a === undefined || a === '') return false;
+                if (a === undefined || a === '' || (Array.isArray(a) && a.length === 0)) return false;
             }
         }
         return true;
@@ -65,13 +105,21 @@ export default function TestPage() {
         if (!test) return [];
         return test.stages.map((s, i) => ({
             index: i,
-            unanswered: s.questions.filter(q => answers[q.id] === undefined || answers[q.id] === '').length
+            unanswered: s.questions.filter(q => {
+                const a = answers[q.id];
+                return a === undefined || a === '' || (Array.isArray(a) && a.length === 0);
+            }).length
         })).filter(s => s.unanswered > 0);
     };
 
     const submitTest = async () => {
-        if (!test || !allAnswered()) return;
+        if (!test) return;
+        // If timer ran out, we ignore allAnswered validation
+        if (timeLeft !== null && timeLeft > 0 && !allAnswered()) return;
+        if (timeLeft === null && !allAnswered()) return;
+
         setSubmitting(true);
+        const timeTaken = Math.floor((Date.now() - startedAt) / 1000);
 
         let score = 0;
         let maxScore = 0;
@@ -83,8 +131,23 @@ export default function TestPage() {
                     maxScore += pts;
                     const ans = answers[q.id];
                     if (q.type === 'choice') {
-                        const correctIdx = q.options.findIndex(o => o.correct);
-                        if (ans === correctIdx) score += pts;
+                        const correctIndices = q.options.map((o, idx) => o.correct ? idx : -1).filter(idx => idx !== -1);
+                        if (correctIndices.length <= 1) {
+                            if (ans === correctIndices[0]) score += pts;
+                        } else {
+                            if (Array.isArray(ans)) {
+                                if (test.gradingMode === 'auto-complex') {
+                                    const correctSelected = ans.filter(idx => correctIndices.includes(idx)).length;
+                                    const incorrectSelected = ans.filter(idx => !correctIndices.includes(idx)).length;
+                                    const netCorrect = Math.max(0, correctSelected - incorrectSelected);
+                                    score += (netCorrect / correctIndices.length) * pts;
+                                } else {
+                                    const allCorrectSelected = correctIndices.every(idx => ans.includes(idx));
+                                    const noIncorrectSelected = ans.every(idx => correctIndices.includes(idx));
+                                    if (allCorrectSelected && noIncorrectSelected) score += pts;
+                                }
+                            }
+                        }
                     } else {
                         const correct = q.correctAnswers[0]?.trim().toLowerCase();
                         if (correct && String(ans).trim().toLowerCase() === correct) score += pts;
@@ -104,15 +167,29 @@ export default function TestPage() {
             studentClass: studentClass.trim(),
             fingerprint: '',
             submittedAt: Date.now(),
+            userId: currentUser?.uid || undefined,
             answers,
             score: test.gradingMode !== 'manual' ? score : undefined,
             maxScore,
             graded: test.gradingMode !== 'manual',
             grade: test.gradingMode !== 'manual' ? grade : undefined,
+            timeTaken,
         };
 
         try {
-            await push(ref(db, `testSubmissions/${test.id}`), submission);
+            const newSubRef = await push(ref(db, `testSubmissions/${test.id}`), submission);
+            if (currentUser) {
+                await push(ref(db, `testResults/${currentUser.uid}`), {
+                    testId: test.id,
+                    testTitle: test.title,
+                    score,
+                    maxScore,
+                    grade,
+                    completedAt: Date.now(),
+                    submissionId: newSubRef.key,
+                    timeTaken
+                });
+            }
             setResult({ score, maxScore, grade });
             setPhase('result');
         } catch {
@@ -181,14 +258,10 @@ export default function TestPage() {
 
                                 <div className="space-y-3 mb-6">
                                     <div>
-                                        <label className="block text-xs mb-1.5" style={{ color: 'var(--text-500)' }}>Имя</label>
-                                        <input type="text" value={studentName} onChange={e => setStudentName(e.target.value)} placeholder="Иван"
-                                            className="w-full px-3.5 py-2.5 rounded-xl text-sm focus:outline-none" style={inputStyle} />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs mb-1.5" style={{ color: 'var(--text-500)' }}>Фамилия</label>
-                                        <input type="text" value={studentLastName} onChange={e => setStudentLastName(e.target.value)} placeholder="Иванов"
-                                            className="w-full px-3.5 py-2.5 rounded-xl text-sm focus:outline-none" style={inputStyle} />
+                                        <label className="block text-xs mb-1.5" style={{ color: 'var(--text-500)' }}>Студент</label>
+                                        <div className="w-full px-3.5 py-2.5 rounded-xl text-sm" style={{ ...inputStyle, background: 'var(--bg-card)', color: 'var(--text-400)' }}>
+                                            {studentName} {studentLastName}
+                                        </div>
                                     </div>
                                     <div>
                                         <label className="block text-xs mb-1.5" style={{ color: 'var(--text-500)' }}>Класс</label>
@@ -233,8 +306,20 @@ export default function TestPage() {
                                     <h1 className="text-lg font-bold" style={{ color: 'var(--text-100)' }}>{test.title}</h1>
                                     <p className="text-[12px]" style={{ color: 'var(--text-600)' }}>{studentName} {studentLastName} · {studentClass}</p>
                                 </div>
-                                <div className="text-right text-[12px]" style={{ color: 'var(--text-600)' }}>
-                                    Этап {currentStage + 1} / {test.stages.length}
+                                <div className="text-right flex flex-col items-end gap-1">
+                                    <div className="text-[12px]" style={{ color: 'var(--text-600)' }}>
+                                        Этап {currentStage + 1} / {test.stages.length}
+                                    </div>
+                                    {timeLeft !== null && (
+                                        <div className="text-[13px] font-mono font-bold px-2 py-0.5 rounded-lg"
+                                            style={{
+                                                background: timeLeft <= 60 ? 'var(--red-bg)' : 'var(--bg-card-hover)',
+                                                color: timeLeft <= 60 ? 'var(--red)' : 'var(--text-300)',
+                                                border: `1px solid ${timeLeft <= 60 ? 'var(--red-border)' : 'var(--border)'}`
+                                            }}>
+                                            ⏱ {formatTime(timeLeft)}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -278,28 +363,37 @@ export default function TestPage() {
                                                 dangerouslySetInnerHTML={{ __html: renderMarkdown(q.text) }} />
                                         </div>
 
-                                        {q.type === 'choice' ? (
-                                            <div className="space-y-2 ml-3 sm:ml-6">
-                                                {q.options.map((opt, oIdx) => (
-                                                    <button key={oIdx} onClick={() => setAnswer(q.id, oIdx)}
-                                                        className="w-full text-left flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-all text-sm active:scale-[0.99]"
-                                                        style={{
-                                                            border: `1px solid ${answers[q.id] === oIdx ? 'var(--accent-border)' : 'var(--border)'}`,
-                                                            background: answers[q.id] === oIdx ? 'var(--accent-bg)' : 'var(--bg-card-hover)',
-                                                            color: 'var(--text-200)',
-                                                        }}>
-                                                        <div className="w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0"
-                                                            style={{
-                                                                borderColor: answers[q.id] === oIdx ? 'var(--accent)' : 'var(--border-hover)',
-                                                                background: answers[q.id] === oIdx ? 'var(--accent)' : 'transparent',
-                                                            }}>
-                                                            {answers[q.id] === oIdx && <span className="text-white text-[8px]">●</span>}
-                                                        </div>
-                                                        {opt.text}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        ) : (
+                                        {q.type === 'choice' ? (() => {
+                                            const multi = q.options.filter(o => o.correct).length > 1;
+                                            return (
+                                                <div className="space-y-2 ml-3 sm:ml-6">
+                                                    {q.options.map((opt, oIdx) => {
+                                                        const isSelected = multi
+                                                            ? (Array.isArray(answers[q.id]) && (answers[q.id] as number[]).includes(oIdx))
+                                                            : answers[q.id] === oIdx;
+
+                                                        return (
+                                                            <button key={oIdx} onClick={() => multi ? toggleMultiAnswer(q.id, oIdx) : setAnswer(q.id, oIdx)}
+                                                                className="w-full text-left flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-all text-sm active:scale-[0.99]"
+                                                                style={{
+                                                                    border: `1px solid ${isSelected ? 'var(--accent-border)' : 'var(--border)'}`,
+                                                                    background: isSelected ? 'var(--accent-bg)' : 'var(--bg-card-hover)',
+                                                                    color: 'var(--text-200)',
+                                                                }}>
+                                                                <div className={`w-4 h-4 shrink-0 flex items-center justify-center border-2 ${multi ? 'rounded-[4px]' : 'rounded-full'}`}
+                                                                    style={{
+                                                                        borderColor: isSelected ? 'var(--accent)' : 'var(--border-hover)',
+                                                                        background: isSelected ? 'var(--accent)' : 'transparent',
+                                                                    }}>
+                                                                    {isSelected && (multi ? <span className="text-white text-[10px]">✓</span> : <span className="text-white text-[8px]">●</span>)}
+                                                                </div>
+                                                                {opt.text}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            );
+                                        })() : (
                                             <div className="ml-3 sm:ml-6">
                                                 <textarea value={String(answers[q.id] || '')} onChange={e => setAnswer(q.id, e.target.value)}
                                                     placeholder="Введите ответ..."
@@ -324,7 +418,7 @@ export default function TestPage() {
 
                                 {currentStage === test.stages.length - 1 ? (
                                     <button onClick={() => {
-                                        if (!allAnswered()) {
+                                        if (!allAnswered() && (timeLeft === null || timeLeft > 0)) {
                                             const unList = unans.map(u => `Этап ${u.index + 1}`).join(', ');
                                             setError(`Ответьте на все вопросы: ${unList}`);
                                             return;
@@ -404,22 +498,55 @@ export default function TestPage() {
                                                 stage.questions.map(q => {
                                                     const ans = answers[q.id];
                                                     let isCorrect = false;
+                                                    let pointsEarned = 0;
+                                                    const maxPts = test.gradingMode === 'auto-complex' ? q.points : 1;
+
                                                     if (q.type === 'choice') {
-                                                        isCorrect = q.options.findIndex(o => o.correct) === ans;
+                                                        const correctIndices = q.options.map((o, idx) => o.correct ? idx : -1).filter(idx => idx !== -1);
+                                                        if (correctIndices.length <= 1) {
+                                                            isCorrect = correctIndices[0] === ans;
+                                                            if (isCorrect) pointsEarned = maxPts;
+                                                        } else {
+                                                            if (Array.isArray(ans)) {
+                                                                if (test.gradingMode === 'auto-complex') {
+                                                                    const correctSelected = ans.filter(idx => correctIndices.includes(idx)).length;
+                                                                    const incorrectSelected = ans.filter(idx => !correctIndices.includes(idx)).length;
+                                                                    const netCorrect = Math.max(0, correctSelected - incorrectSelected);
+                                                                    pointsEarned = (netCorrect / correctIndices.length) * maxPts;
+                                                                    isCorrect = pointsEarned === maxPts;
+                                                                } else {
+                                                                    const allCorrectSelected = correctIndices.every(idx => ans.includes(idx));
+                                                                    const noIncorrectSelected = ans.every(idx => correctIndices.includes(idx));
+                                                                    isCorrect = allCorrectSelected && noIncorrectSelected;
+                                                                    if (isCorrect) pointsEarned = maxPts;
+                                                                }
+                                                            }
+                                                        }
                                                     } else {
                                                         const correct = q.correctAnswers[0]?.trim().toLowerCase();
                                                         isCorrect = !!correct && String(ans).trim().toLowerCase() === correct;
+                                                        if (isCorrect) pointsEarned = maxPts;
                                                     }
+
+                                                    const partial = pointsEarned > 0 && pointsEarned < maxPts;
+
                                                     return (
                                                         <div key={q.id} className="rounded-lg p-3 text-[13px]"
-                                                            style={{ border: `1px solid ${isCorrect ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}`, background: isCorrect ? 'rgba(74,222,128,0.03)' : 'rgba(248,113,113,0.03)' }}>
+                                                            style={{ border: `1px solid ${isCorrect ? 'rgba(74,222,128,0.15)' : partial ? 'rgba(251,191,36,0.15)' : 'rgba(248,113,113,0.15)'}`, background: isCorrect ? 'rgba(74,222,128,0.03)' : partial ? 'rgba(251,191,36,0.03)' : 'rgba(248,113,113,0.03)' }}>
                                                             <div className="flex items-center gap-2 mb-1">
-                                                                <span>{isCorrect ? '✅' : '❌'}</span>
-                                                                <span style={{ color: 'var(--text-200)' }}>{q.text.substring(0, 60)}{q.text.length > 60 ? '...' : ''}</span>
+                                                                <span>{isCorrect ? '✅' : partial ? '⚠️' : '❌'}</span>
+                                                                <span style={{ color: 'var(--text-200)' }}>
+                                                                    {q.text.substring(0, 60)}{q.text.length > 60 ? '...' : ''}
+                                                                </span>
+                                                                {test.gradingMode === 'auto-complex' && (
+                                                                    <span className="ml-auto text-[10px] font-mono" style={{ color: isCorrect ? 'var(--green)' : partial ? 'var(--amber)' : 'var(--red)' }}>
+                                                                        {Number(pointsEarned.toFixed(2))}/{maxPts}
+                                                                    </span>
+                                                                )}
                                                             </div>
                                                             {q.type === 'choice' && !isCorrect && (
                                                                 <p className="text-[11px] ml-6" style={{ color: 'var(--green)' }}>
-                                                                    Правильно: {q.options.find(o => o.correct)?.text}
+                                                                    Правильно: {q.options.filter(o => o.correct).map(o => o.text).join(', ')}
                                                                 </p>
                                                             )}
                                                             {q.explanation && (
