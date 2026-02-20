@@ -7,6 +7,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { UserProfile } from '@/contexts/AuthContext';
 import TestEditor from '@/components/TestEditor';
 import type { Test, TestSubmission } from '@/types/test';
+import toast from 'react-hot-toast';
+import ConfirmModal from '@/components/ConfirmModal';
 
 interface FingerprintData { users: string[]; lastSeen: number; }
 
@@ -28,6 +30,12 @@ export default function AdminPanel() {
   const [tests, setTests] = useState<Test[]>([]);
   const [submissions, setSubmissions] = useState<Record<string, TestSubmission[]>>({});
   const [activeTab, setActiveTab] = useState<'users' | 'tests' | 'security' | 'messages'>('users');
+  const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', isDestructive: false, onConfirm: () => { } });
+
+  const askConfirm = (title: string, message: string, isDestructive: boolean, onConfirm: () => void) => {
+    setConfirmState({ isOpen: true, title, message, isDestructive, onConfirm });
+  };
+
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
@@ -82,31 +90,43 @@ export default function AdminPanel() {
 
   const toggleAdmin = async (uid: string, cur: boolean) => { await set(ref(db, `users/${uid}/admin`), !cur); };
   const clearSuspicious = async (uid: string) => { await set(ref(db, `users/${uid}/suspiciousFlag`), false); };
-  const deleteUser = async (uid: string) => {
-    if (confirm('Удалить этого пользователя из базы данных?')) {
-      await remove(ref(db, `users/${uid}`));
-      await remove(ref(db, `testResults/${uid}`));
-      await remove(ref(db, `messages/${uid}`));
-    }
+  const deleteUser = (uid: string) => {
+    askConfirm('Удаление пользователя', 'Вы уверены, что хотите удалить этого пользователя и все его данные? Это необратимо.', true, async () => {
+      try {
+        await remove(ref(db, `users/${uid}`));
+        await remove(ref(db, `testResults/${uid}`));
+        await remove(ref(db, `messages/${uid}`));
+        toast.success('Пользователь успешно удален');
+      } catch (e) { toast.error('Ошибка при удалении'); }
+    });
   };
   const sendReply = async (userId: string) => {
     if (!replyText.trim()) return;
-    await push(ref(db, `messages/${userId}`), { from: 'admin', fromName: 'Учитель', text: replyText.trim(), timestamp: Date.now() });
-    setReplyText('');
+    try {
+      await push(ref(db, `messages/${userId}`), { from: 'admin', fromName: 'Учитель', text: replyText.trim(), timestamp: Date.now() });
+      setReplyText('');
+      toast.success('Сообщение отправлено');
+    } catch (e) { toast.error('Ошибка отправки'); }
   };
   const markRead = async (id: string) => { await set(ref(db, `adminNotifications/${id}/read`), true); };
 
   // Test management
   const saveTest = async (t: Test) => {
     t.createdBy = currentUser!.uid;
-    await set(ref(db, `tests/${t.id}`), t);
-    setEditingTest(null);
+    try {
+      await set(ref(db, `tests/${t.id}`), t);
+      setEditingTest(null);
+      toast.success('Тест сохранен успешно');
+    } catch (e) { toast.error('Ошибка сохранения'); }
   };
-  const deleteTest = async (id: string) => {
-    if (confirm('Удалить этот тест?')) {
-      await remove(ref(db, `tests/${id}`));
-      await remove(ref(db, `testSubmissions/${id}`));
-    }
+  const deleteTest = (id: string) => {
+    askConfirm('Удаление теста', 'Вы уверены, что хотите безвозвратно удалить этот тест?', true, async () => {
+      try {
+        await remove(ref(db, `tests/${id}`));
+        await remove(ref(db, `testSubmissions/${id}`));
+        toast.success('Тест удален');
+      } catch (e) { toast.error('Ошибка удаления'); }
+    });
   };
   const togglePublish = async (id: string, cur: boolean) => {
     await set(ref(db, `tests/${id}/published`), !cur);
@@ -748,6 +768,15 @@ export default function AdminPanel() {
           </div>
         )}
       </div>
+
+      <ConfirmModal
+        isOpen={confirmState.isOpen}
+        title={confirmState.title}
+        message={confirmState.message}
+        isDestructive={confirmState.isDestructive}
+        onConfirm={confirmState.onConfirm}
+        onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import type { Test, TestStage, TestQuestion, GradingMode } from '@/types/test';
 import { generateId, createEmptyQuestion, createEmptyStage } from '@/types/test';
 import { renderMarkdown } from '@/utils/markdown';
+import toast from 'react-hot-toast';
 
 // ========= Image compression =========
 async function compressImage(file: File, maxW = 1200, quality = 0.8): Promise<string> {
@@ -113,7 +114,7 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
     const isNew = !test;
 
     const [title, setTitle] = useState(test?.title || '');
-    const [description, setDescription] = useState(test?.description || '');
+    const [description] = useState(test?.description || '');
     const [gradingMode, setGradingMode] = useState<GradingMode>(test?.gradingMode || 'auto-simple');
     const [published, setPublished] = useState(test?.published ?? false);
     const [stages, setStages] = useState<TestStage[]>(test?.stages || [createEmptyStage()]);
@@ -200,8 +201,8 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
     // Handle image upload
     const handleImageUpload = useCallback(async (file: File, target: HTMLTextAreaElement | null) => {
         if (!file || !target) return;
-        if (file.size > 10 * 1024 * 1024) { alert('Файл слишком большой (макс. 10 МБ)'); return; }
-        if (!file.type.startsWith('image/')) { alert('Допускаются только изображения'); return; }
+        if (file.size > 10 * 1024 * 1024) { toast.error('Файл слишком большой (макс. 10 МБ)'); return; }
+        if (!file.type.startsWith('image/')) { toast.error('Допускаются только изображения'); return; }
         try {
             const dataUrl = await compressImage(file);
             const md = `![${file.name}](${dataUrl})`;
@@ -212,7 +213,7 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
             nativeInputValueSetter?.call(target, newVal);
             target.dispatchEvent(new Event('input', { bubbles: true }));
         } catch {
-            alert('Ошибка загрузки изображения');
+            toast.error('Ошибка загрузки изображения');
         }
     }, []);
 
@@ -286,8 +287,8 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
 
     // Save
     const handleSave = async () => {
-        if (!title.trim()) { alert('Введите название теста'); return; }
-        if (stages.some(s => s.questions.some(q => !q.text.trim()))) { alert('Заполните текст всех вопросов'); return; }
+        if (!title.trim()) { toast.error('Введите название теста'); return; }
+        if (stages.some(s => s.questions.some(q => !q.text.trim()))) { toast.error('Заполните текст всех вопросов'); return; }
         setSaving(true);
         try {
             const t: Test = {
@@ -303,7 +304,7 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
             };
             await onSave(t);
         } catch {
-            alert('Ошибка сохранения');
+            toast.error('Ошибка сохранения');
         }
         setSaving(false);
     };

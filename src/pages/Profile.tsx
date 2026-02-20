@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { ref, onValue, push, set } from 'firebase/database';
 import { db } from '@/firebase';
 import { useAuth } from '@/contexts/AuthContext';
+import { motion } from 'framer-motion';
+import toast from 'react-hot-toast';
 
 interface TestResult {
   id: string;
@@ -46,7 +48,9 @@ export default function Profile() {
       await set(ref(db, `users/${currentUser.uid}/firstName`), editFirstName.trim());
       await set(ref(db, `users/${currentUser.uid}/lastName`), editLastName.trim());
       setEditingName(false);
+      toast.success('Имя успешно изменено');
     } catch (e) {
+      toast.error('Не удалось сохранить изменения');
       console.error('Failed to save name:', e);
     }
     setSavingName(false);
@@ -195,18 +199,24 @@ export default function Profile() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-4">
+        <div className="flex gap-2 mb-4 p-1 rounded-2xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
           {(['tests', 'messages'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className="px-4 py-2 rounded-xl text-[13px] font-medium transition-all"
-              style={activeTab === tab
-                ? { background: 'var(--accent)', color: '#fff' }
-                : { border: '1px solid var(--border)', color: 'var(--text-500)', background: 'var(--bg-card)' }
-              }
+              className="relative flex-1 py-2 text-[13px] font-medium transition-colors"
+              style={{ color: activeTab === tab ? '#fff' : 'var(--text-500)', WebkitTapHighlightColor: 'transparent' }}
             >
-              {tab === 'tests' ? 'Мои тесты' : 'Сообщения'}
+              {activeTab === tab && (
+                <motion.div
+                  layoutId="profileTab"
+                  className="absolute inset-0 rounded-xl"
+                  style={{ background: 'var(--accent)' }}
+                  initial={false}
+                  transition={{ type: "spring", stiffness: 450, damping: 30 }}
+                />
+              )}
+              <span className="relative z-10">{tab === 'tests' ? 'Мои тесты' : 'Сообщения'}</span>
             </button>
           ))}
         </div>
