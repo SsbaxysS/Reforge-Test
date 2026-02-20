@@ -117,6 +117,7 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
     const [description] = useState(test?.description || '');
     const [gradingMode, setGradingMode] = useState<GradingMode>(test?.gradingMode || 'auto-simple');
     const [published, setPublished] = useState(test?.published ?? false);
+    const [useTimeLimit, setUseTimeLimit] = useState<boolean>(!!test?.timeLimit);
     const [timeLimit, setTimeLimit] = useState<number>(test?.timeLimit || 0);
     const [stages, setStages] = useState<TestStage[]>(test?.stages || [createEmptyStage()]);
     const [images, setImages] = useState<Record<string, { name: string, data: string }>>(test?.images || {});
@@ -305,7 +306,7 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
                 updatedAt: Date.now(),
                 gradingMode,
                 published,
-                timeLimit: timeLimit > 0 ? timeLimit : undefined,
+                timeLimit: useTimeLimit && timeLimit > 0 ? timeLimit : undefined,
                 stages,
                 images,
             };
@@ -354,9 +355,13 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
                         </select>
                     </div>
                     <div>
-                        <label className="block text-[10px] uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-600)' }}>Время на тест (мин)</label>
-                        <input type="number" min="0" value={timeLimit || ''} onChange={e => setTimeLimit(Number(e.target.value))}
-                            placeholder="Без таймера" className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={inputStyle} />
+                        <label className="flex items-center gap-2 mb-1.5 cursor-pointer">
+                            <input type="checkbox" checked={useTimeLimit} onChange={e => setUseTimeLimit(e.target.checked)} className="w-3.5 h-3.5 rounded" />
+                            <span className="block text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-600)' }}>Таймер (мин)</span>
+                        </label>
+                        <input type="number" min="1" value={timeLimit || ''} onChange={e => setTimeLimit(Number(e.target.value))}
+                            disabled={!useTimeLimit}
+                            placeholder="Без таймера" className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none disabled:opacity-50" style={inputStyle} />
                     </div>
                     <div className="flex items-end">
                         <label className="flex items-center gap-2 cursor-pointer pb-2">
