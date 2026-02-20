@@ -34,6 +34,7 @@ export interface Test {
     stages: TestStage[];
     images?: Record<string, { name: string, data: string }>;
     timeLimit?: number;
+    attemptsLimit?: number;
 }
 
 export interface TestSubmission {

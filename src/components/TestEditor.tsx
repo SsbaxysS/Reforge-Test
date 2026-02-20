@@ -119,6 +119,8 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
     const [published, setPublished] = useState(test?.published ?? false);
     const [useTimeLimit, setUseTimeLimit] = useState<boolean>(!!test?.timeLimit);
     const [timeLimit, setTimeLimit] = useState<number>(test?.timeLimit || 0);
+    const [useAttempts, setUseAttempts] = useState<boolean>(!!test?.attemptsLimit);
+    const [attemptsLimit, setAttemptsLimit] = useState<number>(test?.attemptsLimit || 0);
     const [stages, setStages] = useState<TestStage[]>(test?.stages || [createEmptyStage()]);
     const [images, setImages] = useState<Record<string, { name: string, data: string }>>(test?.images || {});
     const [activeStage, setActiveStage] = useState(0);
@@ -307,6 +309,7 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
                 gradingMode,
                 published,
                 timeLimit: useTimeLimit && timeLimit > 0 ? timeLimit : undefined,
+                attemptsLimit: useAttempts && attemptsLimit > 0 ? attemptsLimit : undefined,
                 stages,
                 images,
             };
@@ -362,6 +365,15 @@ export default function TestEditor({ test, onSave, onCancel }: Props) {
                         <input type="number" min="1" value={timeLimit || ''} onChange={e => setTimeLimit(Number(e.target.value))}
                             disabled={!useTimeLimit}
                             placeholder="Без таймера" className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none disabled:opacity-50" style={inputStyle} />
+                    </div>
+                    <div>
+                        <label className="flex items-center gap-2 mb-1.5 cursor-pointer">
+                            <input type="checkbox" checked={useAttempts} onChange={e => setUseAttempts(e.target.checked)} className="w-3.5 h-3.5 rounded" />
+                            <span className="block text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-600)' }}>Ограниченные попытки</span>
+                        </label>
+                        <input type="number" min="1" value={attemptsLimit || ''} onChange={e => setAttemptsLimit(Number(e.target.value))}
+                            disabled={!useAttempts}
+                            placeholder="Без ограничений" className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none disabled:opacity-50" style={inputStyle} />
                     </div>
                     <div className="flex items-end">
                         <label className="flex items-center gap-2 cursor-pointer pb-2">

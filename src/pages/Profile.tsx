@@ -1,19 +1,22 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ref, onValue, push, set } from 'firebase/database';
+import { ref, onValue, push, set, get } from 'firebase/database';
 import { db } from '@/firebase';
 import { useAuth } from '@/contexts/AuthContext';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
+import type { Test, TestSubmission } from '@/types/test';
 
 interface TestResult {
   id: string;
+  testId: string;
   testName: string;
   score: number;
   maxScore: number;
   completedAt: number;
   fingerprint: string;
   timeTaken?: number;
+  submissionId?: string; // We'll add this mapping to make it easier, or query by testId + userId
 }
 
 interface Message {
@@ -35,6 +38,12 @@ export default function Profile() {
   const [editFirstName, setEditFirstName] = useState('');
   const [editLastName, setEditLastName] = useState('');
   const [savingName, setSavingName] = useState(false);
+
+  // Detailed Modal State
+  const [selectedResult, setSelectedResult] = useState<TestResult | null>(null);
+  const [testDetails, setTestDetails] = useState<Test | null>(null);
+  const [submissionDetails, setSubmissionDetails] = useState<TestSubmission | null>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
 
   const startEditName = () => {
     setEditFirstName(userProfile?.firstName || '');
@@ -110,6 +119,42 @@ export default function Profile() {
   const avgScore = testResults.length > 0
     ? Math.round(testResults.reduce((a, t) => a + (t.score / t.maxScore) * 100, 0) / testResults.length)
     : 0;
+
+  const openTestDetails = async (result: TestResult) => {
+    setSelectedResult(result);
+    setLoadingDetails(true);
+    setTestDetails(null);
+    setSubmissionDetails(null);
+
+    try {
+      // Fetch Test
+      const testSnap = await get(ref(db, `tests/${result.testId}`));
+      if (testSnap.exists()) {
+        setTestDetails(testSnap.val() as Test);
+      }
+
+      // Fetch Submission using submissionId if it exists, otherwise find it
+      const subsSnap = await get(ref(db, `testSubmissions/${result.testId}`));
+      if (subsSnap.exists()) {
+        const subs = Object.entries(subsSnap.val());
+        // Find by userId and timestamps closely matching
+        const sub = subs.find(([_id, val]: [string, any]) =>
+          val.userId === currentUser?.uid && Math.abs(val.submittedAt - result.completedAt) < 5000
+        );
+        if (sub) {
+          setSubmissionDetails(sub[1] as TestSubmission);
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching details', e);
+      toast.error('Ошибка загрузки деталей');
+    }
+    setLoadingDetails(false);
+  };
+
+  const closeDetails = () => {
+    setSelectedResult(null);
+  };
 
   if (!userProfile) {
     return (
@@ -236,10 +281,11 @@ export default function Profile() {
                 const percent = Math.round((result.score / result.maxScore) * 100);
                 const color = percent >= 80 ? 'var(--green)' : percent >= 60 ? 'var(--amber)' : 'var(--red)';
                 return (
-                  <div key={result.id} className="glow-card rounded-2xl p-5 transition-all duration-500"
+                  <div key={result.id} className="glow-card rounded-2xl p-5 transition-all duration-500 cursor-pointer"
                     style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-hover)'; }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; }}
+                    onClick={() => openTestDetails(result)}
                   >
                     <div className="flex items-center justify-between">
                       <div>
@@ -298,31 +344,205 @@ export default function Profile() {
               )}
             </div>
 
-            {/* Input */}
-            <div className="p-3" style={{ borderTop: '1px solid var(--border)' }}>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newMessage}
-                  onChange={e => setNewMessage(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && sendMessage()}
-                  placeholder="Сообщение..."
-                  className="flex-1 px-3.5 py-2.5 rounded-xl text-sm focus:outline-none"
-                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-200)' }}
-                />
-                <button
-                  onClick={sendMessage}
-                  disabled={!newMessage.trim()}
-                  className="px-4 py-2.5 text-white text-sm font-medium rounded-xl transition-all disabled:opacity-30"
-                  style={{ background: 'var(--accent)' }}
-                >
-                  ↑
-                </button>
+            {/* Message Input Bottom */}
+            {activeTab === 'messages' && (
+              <div className="fixed bottom-0 left-0 right-0 sm:static bg-opacity-90 backdrop-blur-md p-4 sm:p-0 sm:mt-4 sm:bg-transparent"
+                style={{ background: 'var(--bg)', borderTop: '1px solid var(--border)', zIndex: 40 }}>
+                <div className="max-w-5xl mx-auto flex gap-2">
+                  <input
+                    type="text"
+                    value={newMessage}
+                    onChange={e => setNewMessage(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                    placeholder="Сообщение учителю..."
+                    className="flex-1 px-4 py-3 rounded-xl text-sm outline-none"
+                    style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-100)' }}
+                  />
+                  <button
+                    onClick={sendMessage}
+                    disabled={!newMessage.trim()}
+                    className="px-6 rounded-xl font-medium text-white transition-opacity disabled:opacity-50"
+                    style={{ background: 'var(--accent)' }}
+                  >
+                    Отправить
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
       </div>
+
+      {/* Detailed Result Modal */}
+      <AnimatePresence>
+        {selectedResult && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={closeDetails}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
+              onClick={e => e.stopPropagation()}
+              className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl overflow-hidden shadow-2xl"
+              style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
+            >
+              {/* Header */}
+              <div className="p-5 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+                <div>
+                  <h2 className="text-xl font-bold" style={{ color: 'var(--text-100)' }}>{selectedResult.testName}</h2>
+                  <p className="text-sm mt-1" style={{ color: 'var(--text-500)' }}>
+                    Оценка: {selectedResult.score} / {selectedResult.maxScore} баллов
+                    {selectedResult.timeTaken && ` · Время: ${Math.floor(selectedResult.timeTaken / 60)}:${(selectedResult.timeTaken % 60).toString().padStart(2, '0')}`}
+                  </p>
+                </div>
+                <button onClick={closeDetails} className="p-2 rounded-xl transition-colors hover:bg-black/10 dark:hover:bg-white/10" style={{ color: 'var(--text-500)' }}>
+                  ✕
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="p-5 overflow-y-auto flex-1 space-y-6">
+                {loadingDetails ? (
+                  <div className="flex justify-center p-10">
+                    <div className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--border)', borderTopColor: 'var(--accent)' }} />
+                  </div>
+                ) : testDetails && submissionDetails ? (
+                  testDetails.stages.map((stage, sIdx) => (
+                    <div key={stage.id} className="space-y-4">
+                      <h3 className="text-lg font-bold" style={{ color: 'var(--text-200)' }}>
+                        {testDetails.stages.length > 1 ? `${sIdx + 1}. ` : ''}{stage.title}
+                      </h3>
+                      <div className="space-y-4">
+                        {stage.questions.map((q, qIdx) => {
+                          const ans = submissionDetails.answers[q.id];
+                          const isCheckbox = q.options.filter(o => o.correct).length > 1;
+
+                          let isCorrectAll = false;
+                          let pointsEarned = 0;
+
+                          if (q.type === 'text') {
+                            const normalizedAns = String(ans || '').trim().toLowerCase();
+                            isCorrectAll = q.correctAnswers.some(ca => ca.trim().toLowerCase() === normalizedAns);
+                            pointsEarned = isCorrectAll ? q.points : 0;
+                          } else {
+                            if (isCheckbox) {
+                              const ansArr = Array.isArray(ans) ? ans : [];
+                              const totalCorrect = q.options.filter(o => o.correct).length;
+                              let correctHits = 0;
+                              let incorrectHits = 0;
+
+                              ansArr.forEach(idx => {
+                                if (q.options[idx as number]?.correct) correctHits++;
+                                else incorrectHits++;
+                              });
+
+                              if (testDetails.gradingMode === 'auto-complex') {
+                                isCorrectAll = correctHits === totalCorrect && incorrectHits === 0;
+                                const raw = (correctHits - incorrectHits) / totalCorrect;
+                                pointsEarned = Math.max(0, raw * q.points);
+                              } else {
+                                isCorrectAll = correctHits === totalCorrect && incorrectHits === 0;
+                                pointsEarned = isCorrectAll ? q.points : 0;
+                              }
+                            } else {
+                              const ansNum = Number(ans);
+                              isCorrectAll = q.options[ansNum]?.correct === true;
+                              pointsEarned = isCorrectAll ? q.points : 0;
+                            }
+                          }
+
+                          // Simplify floating point display
+                          pointsEarned = Math.round(pointsEarned * 100) / 100;
+
+                          return (
+                            <div key={q.id} className="p-4 rounded-xl" style={{
+                              background: 'var(--bg-card)',
+                              border: `1px solid ${isCorrectAll ? 'var(--green-border, var(--border))' : 'var(--red-border, var(--border))'}`
+                            }}>
+                              <div className="flex justify-between items-start mb-3 gap-4">
+                                <p className="text-[14px] font-medium leading-relaxed" style={{ color: 'var(--text-100)' }}>
+                                  {qIdx + 1}. {q.text}
+                                </p>
+                                <span className="text-[11px] font-bold px-2 py-1 rounded-md whitespace-nowrap"
+                                  style={{
+                                    background: isCorrectAll ? 'var(--green-bg, transparent)' : 'var(--red-bg, transparent)',
+                                    color: isCorrectAll ? 'var(--green)' : 'var(--red)',
+                                    border: `1px solid ${isCorrectAll ? 'var(--green)' : 'var(--red)'}`
+                                  }}>
+                                  {pointsEarned} / {q.points}
+                                </span>
+                              </div>
+
+                              <div className="space-y-2 mt-3">
+                                {q.type === 'choice' ? (
+                                  q.options.map((opt, oIdx) => {
+                                    const isSelected = isCheckbox
+                                      ? Array.isArray(ans) && ans.includes(oIdx)
+                                      : Number(ans) === oIdx;
+
+                                    const isCorrectOpt = opt.correct;
+
+                                    let highlightClasses = "border-[var(--border)]";
+                                    let icon = "";
+
+                                    if (isSelected && isCorrectOpt) {
+                                      highlightClasses = "border-[var(--green)] bg-[var(--green-bg)] text-[var(--green)]";
+                                      icon = "✓";
+                                    } else if (isSelected && !isCorrectOpt) {
+                                      highlightClasses = "border-[var(--red)] bg-[var(--red-bg)] text-[var(--red)]";
+                                      icon = "✗";
+                                    } else if (!isSelected && isCorrectOpt) {
+                                      highlightClasses = "border-[var(--green)] border-dashed text-[var(--text-400)]";
+                                      icon = "✓ (пропущено)";
+                                    }
+
+                                    return (
+                                      <div key={oIdx} className={`px-3 py-2 rounded-lg border text-sm flex items-start gap-2 ${highlightClasses}`}
+                                        style={{ color: 'var(--text-200)' }}>
+                                        <div className="min-w-[4px] mt-0.5">{icon}</div>
+                                        <div>{opt.text}</div>
+                                      </div>
+                                    );
+                                  })
+                                ) : (
+                                  <div className="space-y-2">
+                                    <div className="px-3 py-2 rounded-lg border text-sm"
+                                      style={{
+                                        borderColor: isCorrectAll ? 'var(--green)' : 'var(--red)',
+                                        color: 'var(--text-200)',
+                                        background: isCorrectAll ? 'var(--green-bg)' : 'var(--red-bg)'
+                                      }}>
+                                      <span className="text-[10px] uppercase tracking-wider block mb-1 opacity-70">Ваш ответ</span>
+                                      {String(ans || '—')}
+                                    </div>
+                                    {!isCorrectAll && (
+                                      <div className="px-3 py-2 rounded-lg border border-dashed border-[var(--green)] text-sm"
+                                        style={{ color: 'var(--text-200)' }}>
+                                        <span className="text-[10px] uppercase tracking-wider block mb-1 opacity-70" style={{ color: 'var(--green)' }}>Правильные варианты</span>
+                                        {q.correctAnswers.join(' ИЛИ ')}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center p-10 text-sm" style={{ color: 'var(--text-500)' }}>
+                    Детальная информация недоступна (возможно тест был удалён или перезаписан)
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }

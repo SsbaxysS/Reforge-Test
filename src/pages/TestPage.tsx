@@ -15,6 +15,7 @@ export default function TestPage() {
     const [test, setTest] = useState<Test | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [attemptsLeft, setAttemptsLeft] = useState<number | null>(null);
 
     const { currentUser, userProfile } = useAuth();
 
@@ -36,16 +37,46 @@ export default function TestPage() {
 
     // Load test
     useEffect(() => {
-        if (!testId) return;
-        get(ref(db, `tests/${testId}`)).then(snap => {
+        if (!testId || !userProfile) return;
+        get(ref(db, `tests/${testId}`)).then(async snap => {
             if (snap.exists()) {
                 const t = snap.val() as Test;
-                if (!t.published) { setError('Тест не опубликован'); }
-                else { setTest(t); }
+                if (!t.published) {
+                    setError('Тест не опубликован');
+                } else {
+                    setTest(t);
+
+                    // Check attempts
+                    if (t.attemptsLimit) {
+                        const subsRef = ref(db, `testSubmissions/${testId}`);
+                        const subsSnap = await get(subsRef);
+
+                        let usedAttempts = 0;
+                        if (subsSnap.exists()) {
+                            const allSubs = Object.values(subsSnap.val()) as TestSubmission[];
+                            // Gather all UIDs that share a fingerprint with this user
+                            const linkedUids = new Set([userProfile.uid, ...(userProfile.linkedFingerprints || [])]);
+
+                            // A submission counts if it was made by this user, OR by a user sharing the fingerprint
+                            usedAttempts = allSubs.filter(s => {
+                                if (s.userId && linkedUids.has(s.userId)) return true;
+                                if (s.fingerprint === userProfile.fingerprint) return true;
+                                return false;
+                            }).length;
+                        }
+
+                        const remaining = Math.max(0, t.attemptsLimit - usedAttempts);
+                        setAttemptsLeft(remaining);
+
+                        if (remaining === 0) {
+                            setError('Вы исчерпали лимит попыток для этого теста');
+                        }
+                    }
+                }
             } else { setError('Тест не найден'); }
             setLoading(false);
         }).catch(() => { setError('Ошибка загрузки'); setLoading(false); });
-    }, [testId]);
+    }, [testId, userProfile]);
 
     const startTest = () => {
         if (!studentName.trim() || !studentLastName.trim() || !studentClass.trim()) { setError('Заполните все поля'); return; }
@@ -256,6 +287,19 @@ export default function TestPage() {
                                     </div>
                                 </div>
 
+                                <div className="mb-6">
+                                    {test.timeLimit && (
+                                        <div className="flex items-center gap-2 mb-2" style={{ color: 'var(--text-400)' }}>
+                                            <span className="text-[16px]">⏱️</span> Время ограничено: <b>{test.timeLimit} мин</b>
+                                        </div>
+                                    )}
+                                    {test.attemptsLimit && (
+                                        <div className="flex items-center gap-2" style={{ color: 'var(--text-400)' }}>
+                                            <span className="text-[16px]">🔄</span> Попытки: <b>{attemptsLeft !== null ? attemptsLeft : test.attemptsLimit} из {test.attemptsLimit}</b>
+                                        </div>
+                                    )}
+                                </div>
+
                                 <div className="space-y-3 mb-6">
                                     <div>
                                         <label className="block text-xs mb-1.5" style={{ color: 'var(--text-500)' }}>Студент</label>
@@ -276,7 +320,7 @@ export default function TestPage() {
                                     </div>
                                 )}
 
-                                <button onClick={startTest} className="w-full py-3 rounded-xl text-white font-medium text-sm transition-all active:scale-95"
+                                <button onClick={startTest} disabled={attemptsLeft === 0} className="w-full py-3 rounded-xl text-white font-medium text-sm transition-all active:scale-95"
                                     style={{ background: 'var(--accent)' }}>
                                     Начать тест
                                 </button>

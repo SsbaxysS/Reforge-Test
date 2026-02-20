@@ -11,6 +11,15 @@ import { ref, set, get, onValue } from 'firebase/database';
 import { auth, db, googleProvider } from '@/firebase';
 import { generateFingerprint, storeFingerprint, storeUserId, getStoredUserIds, getDeviceSignals, getCreationTimestamps, storeCreationTimestamp } from '@/utils/fingerprint';
 
+export interface DeviceInfo {
+  ip?: string;
+  os?: string;
+  browser?: string;
+  language?: string;
+  screenResolution?: string;
+  timezone?: string;
+}
+
 export interface UserProfile {
   uid: string;
   firstName: string;
@@ -23,6 +32,7 @@ export interface UserProfile {
   suspiciousFlag: boolean;
   suspiciousScore?: number;
   suspiciousReasons?: string[];
+  deviceInfo?: DeviceInfo;
 }
 
 interface AuthContextType {
@@ -119,12 +129,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       reasons.push('device_signals_match');
     }
 
-    // ========= APPLY THRESHOLD =========
-    const isSuspicious = score >= SUSPICIOUS_THRESHOLD;
+    // ========= GATHER EXTENDED DEVICE INFO =========
+    let ip = '';
+    try {
+      const ipRes = await fetch('https://api.ipify.org?format=json');
+      const ipData = await ipRes.json();
+      ip = ipData.ip;
+    } catch (e) { console.error('Failed to fetch IP', e); }
 
+    const os = navigator.platform || 'Неизвестно';
+    const browser = navigator.userAgent || 'Неизвестно';
+    const language = navigator.language || 'Неизвестно';
+    const screenResolution = `${window.screen.width}x${window.screen.height}`;
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Неизвестно';
+
+    const deviceInfo: DeviceInfo = {
+      ip, os, browser, language, screenResolution, timezone
+    };
+
+    // ========= SAVE =========
+    const isSuspicious = score >= SUSPICIOUS_THRESHOLD;
     await set(ref(db, `users/${uid}/suspiciousFlag`), isSuspicious);
     await set(ref(db, `users/${uid}/suspiciousScore`), score);
     await set(ref(db, `users/${uid}/suspiciousReasons`), reasons);
+    await set(ref(db, `users/${uid}/deviceInfo`), deviceInfo);
 
     // If flagged, also flag associated accounts with recalculated scores
     if (isSuspicious) {

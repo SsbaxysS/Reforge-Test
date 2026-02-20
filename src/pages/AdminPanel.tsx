@@ -48,7 +48,7 @@ export default function AdminPanel() {
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [activeMessages, setActiveMessages] = useState<Message[]>([]);
-  const [showUserDetail, setShowUserDetail] = useState<UserProfile | null>(null);
+  const [showUserDetail, setShowUserDetail] = useState<string | null>(null);
   const [editingTest, setEditingTest] = useState<Test | null | 'new'>(null);
   const [viewSubmissions, setViewSubmissions] = useState<string | null>(null);
   const [previewTest, setPreviewTest] = useState<Test | null>(null);
@@ -257,6 +257,30 @@ export default function AdminPanel() {
             )) : <p className="text-xs" style={{ color: 'var(--text-600)' }}>Нет данных</p>}
           </div>
           <div className="mb-5">
+            <h3 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-400)' }}>Об устройстве</h3>
+            {user.deviceInfo ? (
+              <div className="grid grid-cols-2 gap-2 text-[11px]" style={{ color: 'var(--text-200)' }}>
+                <div className="p-2 rounded-lg" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+                  <span className="block opacity-50 uppercase tracking-wider mb-1" style={{ fontSize: '9px' }}>IP / Локация</span>
+                  {user.deviceInfo.ip || '—'} / {user.deviceInfo.timezone || '—'}
+                </div>
+                <div className="p-2 rounded-lg" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+                  <span className="block opacity-50 uppercase tracking-wider mb-1" style={{ fontSize: '9px' }}>ОС</span>
+                  {user.deviceInfo.os || '—'}
+                </div>
+                <div className="p-2 rounded-lg" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+                  <span className="block opacity-50 uppercase tracking-wider mb-1" style={{ fontSize: '9px' }}>Браузер</span>
+                  <div className="truncate" title={user.deviceInfo.browser}>{user.deviceInfo.browser || '—'}</div>
+                </div>
+                <div className="p-2 rounded-lg" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+                  <span className="block opacity-50 uppercase tracking-wider mb-1" style={{ fontSize: '9px' }}>Экран / Язык</span>
+                  {user.deviceInfo.screenResolution || '—'} / {user.deviceInfo.language || '—'}
+                </div>
+              </div>
+            ) : <p className="text-xs" style={{ color: 'var(--text-600)' }}>Нет данных</p>}
+          </div>
+
+          <div className="mb-5">
             <h3 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-400)' }}>Результаты тестов</h3>
             {testArr.length === 0 ? <p className="text-xs" style={{ color: 'var(--text-600)' }}>Нет</p> :
               testArr.map(t => (
@@ -435,7 +459,9 @@ export default function AdminPanel() {
 
   return (
     <div className="min-h-screen pt-20" style={{ background: 'var(--bg)' }}>
-      {showUserDetail && <UserDetailModal user={showUserDetail} />}
+      {showUserDetail && users.find(u => u.uid === showUserDetail) && (
+        <UserDetailModal user={users.find(u => u.uid === showUserDetail)!} />
+      )}
       <PreviewModal />
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
@@ -497,7 +523,7 @@ export default function AdminPanel() {
                   <tbody>
                     {filteredUsers.map(user => (
                       <tr key={user.uid} className="cursor-pointer transition-colors" style={{ borderBottom: '1px solid var(--border)' }}
-                        onClick={() => setShowUserDetail(user)}
+                        onClick={() => setShowUserDetail(user.uid)}
                         onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                         <td className="px-5 py-3">
@@ -717,7 +743,7 @@ export default function AdminPanel() {
                         </div>
                       </div>
                       <div className="flex gap-2">
-                        <button onClick={() => setShowUserDetail(u)} className="text-[11px] px-2.5 py-1 rounded-lg" style={{ border: '1px solid var(--border)', color: 'var(--text-400)' }}>Подробнее</button>
+                        <button onClick={() => setShowUserDetail(u.uid)} className="text-[11px] px-2.5 py-1 rounded-lg" style={{ border: '1px solid var(--border)', color: 'var(--text-400)' }}>Подробнее</button>
                         <button onClick={() => clearSuspicious(u.uid)} className="text-[11px] px-2.5 py-1 rounded-lg" style={{ color: 'var(--green)', background: 'rgba(74,222,128,0.06)' }}>Снять</button>
                       </div>
                     </div>
